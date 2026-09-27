@@ -41,13 +41,13 @@ function writeJson(file, obj) {
 const DEFAULT_ROUTERS = [
   {
     id: 'den', name: 'Den router', model: 'Calix GigaCenter 844E-1', room: 'Den', ssid: 'lg2',
-    lanIp: '192.168.2.1', mode: 'router', role: 'main', macHint: '44:65:7f:40:ce',
-    notes: 'Fiber ONT + main router from HES/EnergyNet. Wi-Fi 5.'
+    lanIp: '192.168.1.1', mode: 'router', role: 'main', macHint: '44:65:7f:40:ce',
+    notes: 'Fiber ONT + main router from HES/EnergyNet. Wi-Fi 5. Hands out 192.168.1.x.'
   },
   {
     id: 'rec', name: 'Rec room router', model: 'Calix GigaSpire BLAST u6.2 (GS4227E)', room: 'Rec room', ssid: 'lg',
-    lanIp: '192.168.1.1', mode: 'router', role: 'second', macHint: '04:bc:9f:02:d1',
-    notes: 'Wi-Fi 6. Fed by the Ethernet run from the den. Currently runs its own 192.168.1.x network.'
+    lanIp: '192.168.2.1', mode: 'router', role: 'second', macHint: '04:bc:9f:02:d1',
+    notes: 'Wi-Fi 6 (EXOS). Fed by the Ethernet run from the den. Runs its own 192.168.2.x network behind the den router.'
   }
 ];
 const DEFAULT_SETTINGS = { autoScanMinutes: 30, extraSubnets: [], routers: DEFAULT_ROUTERS };
@@ -477,6 +477,7 @@ function matchRouter(d) {
 }
 function classify(d) {
   if (d.isSelf) return 'This PC';
+  if (d.isGateway && d.upstream) return 'Router (upstream)';
   if (d.isGateway) return 'Router (gateway)';
   if (d.nestedRouter) return 'Router (runs its own network)';
   if (d.routerMatch) return 'Access point';
@@ -520,7 +521,7 @@ async function enrich(c, ctx) {
   const d = {
     ip: c.ip, cidr: s.cidr, gateway: s.gateway, mac, vendor: shortVendor(vendorOf(mac)), randomMac: mac ? isRandomMac(mac) : false,
     responds: !!c.alive, ping: !!c.ping, rtt: c.rtt ?? null, ttl: c.ttl ?? null, open: c.open || [],
-    isSelf, isGateway: c.ip === s.gateway,
+    isSelf, isGateway: c.ip === s.gateway, upstream: !!s.upstream,
     services: md ? md.services : [], mdnsNames: md ? md.hostnames : [], instances: md ? md.instances : [], txt: md ? md.txt : {},
     ssdpServer: sd ? (sd.servers[0] || '') : '',
     upnp: desc.map(x => ({ friendlyName: x.friendlyName, manufacturer: x.manufacturer, model: x.modelName, type: (x.deviceType || '').split(':').slice(-2, -1)[0] || '', igd: !!x.igd })),
@@ -565,11 +566,32 @@ async function runScan(trigger = 'manual') {
     const ifaceIps = [...new Set(subnets.filter(s => s.hostIp).map(s => s.hostIp))];
 
     scanState.phase = 'Sweeping addresses';
+    const primaryGw = (subnets.find(s => s.gateway) || {}).gateway || null;
+    const traceP = primaryGw ? traceroute('1.1.1.1', 3) : Promise.resolve([]);
     const discoP = Promise.all([mdnsDiscover(ifaceIps), ssdpDiscover(ifaceIps)]);
     const hostList = [];
     for (const s of subnets) for (const ip of hostsIn(s)) if (ip !== s.hostIp) hostList.push({ ip, subnet: s });
     scanState.total = hostList.length;
     const probes = await pool(hostList, 40, async h => { const r = await probeHost(h.ip); scanState.done++; return { ...r, subnet: h.subnet }; });
+
+    // Is there another router above our gateway (double NAT)? Look at the 2nd traceroute hop.
+    scanState.phase = 'Checking for a router upstream';
+    const hops = await traceP;
+    let upstream = null;
+    const gi = hops.findIndex(h => h.ip === primaryGw);
+    if (gi >= 0) {
+      const nxt = hops.slice(gi + 1).find(h => h.ip);
+      if (nxt && (inSubnet(nxt.ip, '192.168.0.0/16') || inSubnet(nxt.ip, '172.16.0.0/12')) && !subnets.some(s => inSubnet(nxt.ip, s.cidr)))
+        upstream = { ip: nxt.ip, cidr: netOf(nxt.ip, 24) + '/24', via: primaryGw };
+    }
+    if (upstream && settings.scanUpstream !== false) {
+      const us = { cidr: upstream.cidr, gateway: upstream.ip, iface: 'through ' + primaryGw, hostIp: null, hostMac: '', upstream: true };
+      subnets.push(us);
+      scanState.phase = 'Sweeping the network above your router';
+      const list = hostsIn(us).map(ip => ({ ip, subnet: us }));
+      scanState.total += list.length;
+      probes.push(...await pool(list, 40, async h => { const r = await probeHost(h.ip); scanState.done++; return { ...r, subnet: h.subnet }; }));
+    }
     scanState.phase = 'Listening for device announcements';
     const [mdns, ssdp] = await discoP;
 
@@ -634,7 +656,8 @@ async function runScan(trigger = 'manual') {
     }
     history.scans.push({
       id: scanId, at: now, trigger, ms: now - scanState.startedAt,
-      networks: subnets.map(s => ({ cidr: s.cidr, gateway: s.gateway, iface: s.iface, hostIp: s.hostIp })),
+      networks: subnets.map(s => ({ cidr: s.cidr, gateway: s.gateway, iface: s.iface, hostIp: s.hostIp, upstream: !!s.upstream })),
+      upstream,
       nested: devices.filter(d => d.nestedRouter).map(d => ({ ip: d.ip, key: d.key, router: d.routerMatch })),
       devices: devices.map(d => [d.key, d.ip, d.cidr, d.responds ? 1 : 0]),
       events
@@ -658,8 +681,15 @@ function analysis() {
   const networks = [];
   if (last) for (const n of last.networks) {
     const gwDev = devs.find(d => d.ip === n.gateway && d.cidr === n.cidr);
-    const r = settings.routers.find(x => x.lanIp === n.gateway) || (gwDev && gwDev.routerMatch && settings.routers.find(x => x.id === gwDev.routerMatch));
-    networks.push({ cidr: n.cidr, gateway: n.gateway, iface: n.iface, hostIp: n.hostIp, router: r ? r.id : null, scannable: true });
+    const r = (gwDev && gwDev.routerMatch && settings.routers.find(x => x.id === gwDev.routerMatch)) || settings.routers.find(x => x.lanIp === n.gateway);
+    networks.push({ cidr: n.cidr, gateway: n.gateway, iface: n.iface, hostIp: n.hostIp, router: r ? r.id : null, scannable: true, upstream: !!n.upstream });
+  }
+  let upstream = null;
+  if (last && last.upstream) {
+    const r = settings.routers.find(x => x.lanIp === last.upstream.ip);
+    const below = networks.find(n => !n.upstream && n.gateway === last.upstream.via);
+    upstream = { ...last.upstream, router: r ? r.id : null, belowRouter: below ? below.router : null, belowCidr: below ? below.cidr : null };
+    if (!networks.find(n => n.cidr === last.upstream.cidr)) networks.push({ cidr: last.upstream.cidr, gateway: last.upstream.ip, router: upstream.router, scannable: false, upstream: true });
   }
   // networks hidden behind a second router
   const nested = devs.filter(d => d.nestedRouter && d.online);
@@ -674,15 +704,15 @@ function analysis() {
     if (!networks.find(n => n.cidr === d.cidr)) networks.push({ cidr: d.cidr, gateway: null, router: d.router || null, scannable: false, manualOnly: true });
   }
   const multi = networks.length > 1;
-  const doubleNat = nested.length > 0 || !!(db.lastDoubleNat && db.lastDoubleNat.pcDoubleNat);
+  const doubleNat = nested.length > 0 || !!upstream || !!(db.lastDoubleNat && db.lastDoubleNat.pcDoubleNat);
   const moved = devs.filter(d => d.moved && !d.moved.acked);
-  return { networks, multi, doubleNat, nestedRouters: nested.map(d => ({ key: d.key, ip: d.ip, router: d.routerMatch })), movedCount: moved.length, possibleRouters: devs.filter(d => d.possibleRouter && d.online).map(d => d.key) };
+  return { networks, multi, doubleNat, upstream, nestedRouters: nested.map(d => ({ key: d.key, ip: d.ip, router: d.routerMatch })), movedCount: moved.length, possibleRouters: devs.filter(d => d.possibleRouter && d.online).map(d => d.key) };
 }
 
 /* ------------------------------------------------------------------ double NAT check */
-async function traceroute(target = '1.1.1.1') {
-  const t = IS_WIN ? await run('tracert', ['-d', '-h', '6', '-w', '800', target], 40000)
-    : await run('traceroute', ['-n', '-m', '6', '-w', '1', '-q', '1', target], 30000);
+async function traceroute(target = '1.1.1.1', maxHops = 6) {
+  const t = IS_WIN ? await run('tracert', ['-d', '-h', String(maxHops), '-w', '800', target], 40000)
+    : await run('traceroute', ['-n', '-m', String(maxHops), '-w', '1', '-q', '1', target], 30000);
   const hops = [];
   for (const line of t.split(/\r?\n/)) {
     const m = line.match(/^\s*(\d+)\s+(.*)$/);
@@ -709,7 +739,9 @@ async function doubleNatCheck() {
     res.routerWanIp = r && r.status === 200 ? xmlTag(r.body, 'NewExternalIPAddress') : null;
   }
   res.hops = hops;
-  const privHops = hops.filter(h => h.ip && isRfc1918(h.ip));
+  // count only the private hops at the start of the path (inside the home), stop at the first public hop
+  const privHops = [];
+  for (const h of hops) { if (!h.ip) continue; if (isRfc1918(h.ip)) privHops.push(h); else break; }
   res.privateHops = privHops.length;
   res.cgnat = hops.some(h => h.ip && isCgnat(h.ip)) || !!(res.routerWanIp && isCgnat(res.routerWanIp));
   res.pcDoubleNat = privHops.length >= 2 || !!(res.routerWanIp && isRfc1918(res.routerWanIp));
@@ -966,6 +998,7 @@ app.get('/api/history/device/:key', (req, res) => {
 app.get('/api/settings', (req, res) => res.json(settings));
 app.put('/api/settings', (req, res) => {
   const b = req.body || {};
+  if ('scanUpstream' in b) settings.scanUpstream = !!b.scanUpstream;
   if ('autoScanMinutes' in b) settings.autoScanMinutes = Math.max(0, Math.min(1440, +b.autoScanMinutes || 0));
   if (Array.isArray(b.extraSubnets)) settings.extraSubnets = b.extraSubnets.map(String).filter(x => /^\d+\.\d+\.\d+\.\d+\/\d+$/.test(x)).slice(0, 8);
   if (Array.isArray(b.routers)) settings.routers = b.routers.slice(0, 8).map((r, i) => ({

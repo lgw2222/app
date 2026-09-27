@@ -1,7 +1,7 @@
 {
   "id": "network-map",
   "name": "Network Map",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "See every device on both routers, catch double NAT and devices that switched networks, label things, keep history, test speeds, manage port forwards.",
   "entry": "server.js",
   "preferredPort": 4380,

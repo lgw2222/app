@@ -196,7 +196,7 @@ const router = id => (S?.settings.routers || []).find(r => r.id === id);
 const routerLabel = id => { const r = router(id); return r ? r.name : ''; };
 const devName = d => d.label || d.autoName || d.ip || 'Unknown';
 const devKind = d => d.kindOverride || d.kind || 'Unknown';
-const netName = n => { const r = router(n.router); return r ? `${r.room || r.name} network` : (n.scannable ? 'Main network' : 'Hidden network'); };
+const netName = n => { const r = router(n.router); return (r ? `${r.room || r.name} network` : (n.upstream ? 'Upstream network' : n.scannable ? 'Main network' : 'Hidden network')) + (n.upstream ? ' (above your router)' : ''); };
 
 const KIND_COLORS = [[/router|access point|network/i,'#7a5af8'],[/roku|fire|google tv|chromecast|smart tv|android tv/i,'#e0567a'],[/pc|windows|this pc/i,'#2b7fd9'],
   [/apple|phone|tablet/i,'#5f6b7a'],[/speaker|sonos|airplay/i,'#16a085'],[/printer/i,'#8e6e3b'],[/smart home/i,'#d4880f'],[/xbox|playstation|nintendo/i,'#2e9e4f']];
@@ -294,7 +294,13 @@ function renderOverview() {
      Your device is on that router’s own network, so this PC can’t see it, and TV apps on this PC can’t reach devices on your side. Your requests still get through because the router passes them along (double NAT).</div></div>`;
 
   if (!S.lastScan) h += `<div class="banner info">${ICON.info}<div><b>No scan yet.</b> The first scan starts on its own a few seconds after launch, or press <b>Scan now</b>. It takes about 15–30 seconds.</div></div>`;
-  else if (A.nestedRouters.length) {
+  else if (A.upstream) {
+    const up = router(A.upstream.router), below = router(A.upstream.belowRouter);
+    h += `<div class="banner bad">${ICON.bad}<div><b>Two networks are in play (double NAT).</b>
+      This PC is on the ${esc(below ? below.name : 'router')}’s network (<span class="mono">${esc(short(A.upstream.belowCidr))}</span>), and that router sits behind the ${esc(up ? up.name : 'router at ' + A.upstream.ip)} (<span class="mono">${esc(short(A.upstream.cidr))}</span>).
+      This PC can reach devices up there, but they can’t reach this PC or anything else on ${esc(short(A.upstream.belowCidr))}, so TV remotes and casting break across the two. Port forwards would also have to be set up on both routers.
+      <div class="row" style="margin-top:10px"><button class="btn small primary" onclick="show('fix')">How to fix it</button></div></div></div>`;
+  } else if (A.nestedRouters.length) {
     for (const n of A.nestedRouters) {
       const r = router(n.router); const hidden = A.networks.find(x => !x.scannable && x.via === n.key);
       h += `<div class="banner bad">${ICON.bad}<div><b>Two networks are in play.</b>
@@ -325,7 +331,8 @@ function renderOverview() {
     h += `<div class="card net ${n.scannable ? '' : 'hidden'}"><div class="nethead"><div><h2>${esc(netName(n))}</h2>
       <div class="cidr">${esc(short(n.cidr))}${n.gateway ? ` · gateway ${esc(n.gateway)}` : ''}${r?.ssid ? ` · Wi-Fi “${esc(r.ssid)}”` : ''}</div></div>
       ${n.scannable ? `<span class="pill good"><i></i>${on.length} online</span>` : `<span class="pill warn"><i></i>can’t scan</span>`}</div>`;
-    if (!n.scannable) h += `<div class="sub" style="margin-bottom:8px">${n.viaIp ? `Behind the router at <span class="mono">${esc(n.viaIp)}</span>. ` : ''}This PC can’t look inside it. Add the devices you know are on this side so the map stays complete.</div>`;
+    if (n.upstream && n.scannable) h += `<div class="sub" style="margin-bottom:8px">Above your router. Found by reaching through it, so MAC addresses and vendors aren’t visible and devices are tracked by IP.</div>`;
+    if (!n.scannable) h += `<div class="sub" style="margin-bottom:8px">${n.upstream ? 'Above your router. Turn on “Sweep the network above my router” in Settings to list these devices. ' : ''}${n.viaIp ? `Behind the router at <span class="mono">${esc(n.viaIp)}</span>. ` : ''}This PC can’t look inside it. Add the devices you know are on this side so the map stays complete.</div>`;
     h += on.map(devRow).join('') || (n.scannable ? '<div class="empty">Nothing found.</div>' : '');
     if (off.length) h += `<details style="margin-top:6px"><summary class="sub" style="cursor:pointer;padding:6px 0">${off.length} offline</summary>${off.map(devRow).join('')}</details>`;
     if (!n.scannable) h += `<div class="row" style="margin-top:10px"><button class="btn small" onclick="addManual('${esc(n.router || '')}','${esc(n.cidr ? n.cidr.split('/')[0].split('.').slice(0,3).join('.') + '.' : '')}')">+ Add a device on this side</button></div>`;
@@ -427,17 +434,21 @@ function addManual(routerId, ipPrefix) {
 function routerStatus(r) {
   const d = S.devices.find(x => x.routerMatch === r.id && !x.manual) || S.devices.find(x => x.isGateway && x.ip === r.lanIp);
   if (!d) return { text: 'Not seen in the last scan from this PC.', cls: '' };
+  if (d.isGateway && d.upstream) return { text: `Gateway for ${short(d.cidr)}, one level above this PC’s router`, cls: 'warn', d };
+  if (d.isGateway && S.analysis.upstream && S.analysis.upstream.via === d.ip) return { text: `Gateway for ${short(d.cidr)} (this PC’s network), running behind another router (double NAT)`, cls: 'bad', d };
   if (d.isGateway) return { text: `Gateway for ${short(d.cidr)} · ${d.online !== false ? 'online' : 'offline'}`, cls: 'good', d };
   if (d.nestedRouter) return { text: `Found at ${d.ip} on ${short(d.cidr)}, running its own network behind it (double NAT)`, cls: 'bad', d };
   return { text: `Found at ${d.ip} as an access point on ${short(d.cidr)}`, cls: 'good', d };
 }
+const inCidr = (ip, cidr) => { if (!ip || !cidr) return false; const [n, p] = cidr.split('/'); const m = p == 0 ? 0 : (~0 << (32 - p)) >>> 0; return ((ipNum(ip) & m) >>> 0) === ((ipNum(n) & m) >>> 0); };
+const reach = r => S.analysis.networks.some(n => n.scannable && inCidr(r.lanIp, n.cidr)) || S.devices.some(d => d.ip === r.lanIp && d.online && !d.manual);
 function renderRouters() {
   const dn = S.lastDoubleNat;
   let h = S.settings.routers.map((r, i) => { const st = routerStatus(r); return `<div class="card" data-ri="${i}">
     <div class="row" style="justify-content:space-between"><div><h2>${esc(r.name)}</h2><div class="sub">${esc(r.model)}${r.room ? ' · ' + esc(r.room) : ''}</div></div>
     <span class="pill ${st.cls}"><i></i>${r.role === 'main' ? 'Main' : r.mode === 'ap' ? 'Access point' : 'Second router'}</span></div>
     <p class="sub" style="margin:10px 0 0">${esc(st.text)}${st.d?.mac ? ` · <span class="mono">${esc(st.d.mac)}</span>` : ''}</p>
-    <div class="row" style="margin-top:10px"><a class="btn small" href="http://${esc(r.lanIp)}" target="_blank" rel="noopener">Open admin page</a><span class="sub">Only opens while you’re connected to ${r.ssid ? '“' + esc(r.ssid) + '”' : 'this router'}${r.mode === 'ap' ? ' or the main network' : ''}.</span></div>
+    <div class="row" style="margin-top:10px"><a class="btn small" href="http://${esc(r.lanIp)}" target="_blank" rel="noopener">Open admin page</a><span class="sub">${reach(r) ? 'Opens from this PC.' : `Only opens while you’re connected to ${r.ssid ? '“' + esc(r.ssid) + '”' : 'this router'}.`}</span></div>
     <details style="margin-top:10px"><summary class="sub" style="cursor:pointer">Edit</summary>
     <div class="grid2">
       <div><label class="f">Name</label><input data-k="name" value="${esc(r.name)}"></div>
@@ -450,7 +461,7 @@ function renderRouters() {
       <div><label class="f">Mode</label><select data-k="mode"><option value="router" ${r.mode !== 'ap' ? 'selected' : ''}>Router (own network)</option><option value="ap" ${r.mode === 'ap' ? 'selected' : ''}>Access point (shares main network)</option></select></div>
     </div><label class="f">Notes</label><textarea data-k="notes">${esc(r.notes)}</textarea>
     <div class="row" style="margin-top:10px"><button class="btn primary small" onclick="saveRouters()">Save routers</button></div></details></div>`; }).join('');
-  h += `<div class="card"><h2>Double NAT check</h2><div class="sub">Checks your public IP, what the den router thinks its internet address is (via UPnP), and how many private hops it takes to reach the internet. Takes about 15 seconds.</div>
+  h += `<div class="card"><h2>Double NAT check</h2><div class="sub">Checks your public IP, what this PC’s router thinks its internet address is (via UPnP), and how many private hops it takes to reach the internet. Takes about 15 seconds.</div>
     <div class="row" style="margin-top:10px"><button class="btn primary" id="dnBtn">Run check</button>${dn ? `<span class="sub">Last run ${ago(dn.at)}</span>` : ''}</div><div id="dnOut">${dn ? dnHtml(dn) : ''}</div></div>`;
   $('#v-routers').innerHTML = h;
   $('#dnBtn').onclick = async () => { const b = $('#dnBtn'); b.disabled = true; b.innerHTML = '<span class="spin"></span> Checking…';
@@ -459,7 +470,8 @@ function renderRouters() {
 function dnHtml(r) {
   const lines = [];
   if (r.nested?.length) lines.push(`<div class="banner bad">${ICON.bad}<div><b>Devices on ${r.nested.map(n => esc(routerLabel(n.router) || n.name)).join(', ')} are double NATed.</b> That router sits behind the den router and runs its own network. This PC itself is ${r.pcDoubleNat ? '<b>also</b> double NATed' : 'not double NATed'}.</div></div>`);
-  else if (r.pcDoubleNat) lines.push(`<div class="banner bad">${ICON.bad}<div><b>This PC is double NATed.</b> There are ${r.privateHops} private hops before the internet.</div></div>`);
+  else if (r.pcDoubleNat) { const pv = (r.hops || []).filter(h => h.ip).slice(0, r.privateHops).map(h => h.ip);
+    lines.push(`<div class="banner bad">${ICON.bad}<div><b>This PC is double NATed.</b> Traffic passes through ${r.privateHops} home routers before the internet: <span class="mono">${esc(pv.join(' → '))}</span>.</div></div>`); }
   else lines.push(`<div class="banner good">${ICON.good}<div><b>No double NAT from this PC.</b></div></div>`);
   if (r.cgnat) lines.push(`<div class="banner warn">${ICON.warn}<div><b>Your ISP uses carrier-grade NAT (100.64.x.x).</b> Port forwarding from the internet won’t work no matter what you set at home. Ask HES/EnergyNet for a public IP if you need it.</div></div>`);
   lines.push(`<div class="kv"><div>Public IP</div><div class="mono">${esc(r.publicIp || 'unknown')}</div><div>Router WAN IP</div><div class="mono">${esc(r.routerWanIp || (r.igd ? 'router didn’t say' : 'UPnP off / not found'))}</div>
@@ -571,6 +583,7 @@ function wifiHtml(w) {
 /* ---------------------------------------------------------------- ports */
 function renderPorts() {
   $('#v-ports').innerHTML = `<div class="card"><h2>Port forwarding (UPnP)</h2><div class="sub">Lists and changes port forwards on the den router over UPnP, with no router login. Needs UPnP turned on in the router. If it’s off, add forwards on the router’s admin page instead.</div>
+    ${S.analysis.upstream ? `<div class="banner warn">${ICON.warn}<div>This lists forwards on the router this PC uses (<span class="mono">${esc(S.analysis.upstream.via)}</span>). Because it sits behind the router at <span class="mono">${esc(S.analysis.upstream.ip)}</span>, a forward also has to be added there by hand before the internet can reach it. Switching to access point mode removes that second step.</div></div>` : ''}
     ${S.analysis.nestedRouters.length ? `<div class="banner warn">${ICON.warn}<div>Forwards only reach devices on the den router’s network. A device behind the rec room router would need a second forward on that router too. Switching it to access point mode fixes that.</div></div>` : ''}
     ${S.lastDoubleNat?.cgnat ? `<div class="banner bad">${ICON.bad}<div>Your ISP uses carrier-grade NAT, so forwards won’t be reachable from the internet.</div></div>` : ''}
     <div id="upOut" style="margin-top:12px"><span class="spin"></span> Asking the router…</div></div>`;
@@ -596,55 +609,57 @@ async function loadUpnp() {
 
 /* ---------------------------------------------------------------- fix it */
 function renderFix() {
-  const rec = S.settings.routers.find(r => r.role !== 'main') || {}; const den = S.settings.routers.find(r => r.role === 'main') || {};
-  const done = store.get('fixSteps', {});
-  const isAp = rec.mode === 'ap';
-  const nested = S.analysis.nestedRouters.length > 0;
+  const rs = S.settings.routers;
+  const main = rs.find(r => r.role === 'main') || rs[0] || {};
+  const sec = rs.find(r => r !== main && r.role !== 'main') || rs[1] || {};
+  const mainPre = (main.lanIp || '192.168.1.1').split('.').slice(0, 3).join('.');
+  const secPre = (sec.lanIp || '192.168.2.1').split('.').slice(0, 3).join('.');
+  const target = mainPre + '.2';
+  const done = store.get('fixSteps2', {});
+  const isAp = sec.mode === 'ap';
+  const A = S.analysis;
+  const twoNets = A.nestedRouters.length > 0 || !!A.upstream;
+  const pcBehindSec = A.upstream && A.upstream.belowRouter === sec.id;
   const steps = [
-    `Write down the rec room router’s current Wi-Fi name (“${esc(rec.ssid || 'lg')}”) and password so you can put them back if anything resets.`,
-    `Connect your phone or laptop to “${esc(rec.ssid || 'lg')}”, open <a href="http://${esc(rec.lanIp || '192.168.1.1')}" target="_blank" rel="noopener">http://${esc(rec.lanIp || '192.168.1.1')}</a> and sign in. The username and password are on the sticker under the router, unless someone changed them.`,
+    `Write down the ${esc(sec.name.toLowerCase())}’s Wi-Fi name${sec.ssid ? ` (“${esc(sec.ssid)}”)` : ''} and password so you can put them back if anything resets.`,
+    `Open its admin page at <a href="${pcBehindSec ? 'https' : 'http'}://${esc(sec.lanIp)}" target="_blank" rel="noopener">${esc(sec.lanIp)}</a>${pcBehindSec ? ' (from this PC, or any device on its network)' : ` from a device on its Wi-Fi${sec.ssid ? ` “${esc(sec.ssid)}”` : ''}`} and sign in.`,
     `Look for an <b>operating mode</b>, <b>bridge</b> or <b>access point</b> setting. If there is one, pick it and skip to step 6. If not, keep going.`,
     `Find the LAN / DHCP settings and <b>turn the DHCP server off</b>.`,
-    `Change the router’s own LAN address to <b class="mono">192.168.2.2</b> (mask 255.255.255.0). If it asks for a gateway or DNS, use <span class="mono">${esc(den.lanIp || '192.168.2.1')}</span>. Save. The page will stop loading, which is expected because it moved.`,
-    `Check the cable from the den: it has to be in one of the rec room router’s <b>LAN</b> ports, not the WAN/internet port. The PC can stay in another LAN port.`,
-    `Turn Wi-Fi off and back on for devices on “${esc(rec.ssid || 'lg')}” (or restart the Fire Stick). They should now get 192.168.2.x addresses.`,
-    `Tell this app it’s done: <button class="btn small" id="markAp" ${isAp ? 'disabled' : ''}>${isAp ? 'Marked as access point' : 'Mark rec room router as access point (192.168.2.2)'}</button>`,
+    `Change the router’s own LAN address to <b class="mono">${esc(target)}</b> (mask 255.255.255.0). If it asks for a gateway or DNS, use <span class="mono">${esc(main.lanIp)}</span>. Save. The page will stop loading, which is expected because it moved.`,
+    `Check the cable coming from the ${esc((main.room || 'main router').toLowerCase())}: it has to be in one of the ${esc(sec.name.toLowerCase())}’s <b>LAN</b> ports, not its WAN/internet port. The PC and anything else wired can stay in the other LAN ports.`,
+    `Restart or reconnect the devices that were on ${esc(short(secPre + '.0/24'))} (PC, TVs, Roku, Wi-Fi devices). They should now get <span class="mono">${esc(mainPre)}.x</span> addresses. Your PC’s address changes too, so Server Hub and its apps will be at a new <span class="mono">${esc(mainPre)}.x</span> address.`,
+    `Update any IP addresses saved in the TV Remote Hub, since your Rokus and TVs will have new ones.`,
+    `Tell this app it’s done: <button class="btn small" id="markAp" ${isAp ? 'disabled' : ''}>${isAp ? 'Marked as access point' : `Mark the ${esc(sec.name.toLowerCase())} as access point (${esc(target)})`}</button>`,
     `Press <button class="btn small primary" id="verifyBtn">Verify</button>. It rescans and confirms there’s only one network.`
   ];
+  const node = (label, sub, cls) => `<div class="node ${cls || ''}">${esc(label)}<small>${esc(sub)}</small></div>`;
   $('#v-fix').innerHTML = `
-    <div class="banner ${nested ? 'bad' : isAp ? 'good' : 'info'}">${nested ? ICON.bad : isAp ? ICON.good : ICON.info}<div><b>${nested ? 'Right now you have two networks.' : isAp ? 'You’re on one network.' : 'Recommendation: put the rec room router in access point mode.'}</b>
-      Both routers keep their own Wi-Fi names and coverage, but only the den router hands out addresses. Everything lands on ${esc(short(den.lanIp ? den.lanIp.split('.').slice(0,3).join('.') + '.0/24' : '192.168.2.0/24'))}, so your TV remote app, casting, and Roku/Fire TV discovery work from any room, and port forwarding only has to be set up once.</div></div>
+    <div class="banner ${twoNets ? 'bad' : isAp ? 'good' : 'info'}">${twoNets ? ICON.bad : isAp ? ICON.good : ICON.info}<div><b>${twoNets ? 'Right now you have two networks.' : isAp ? 'You’re on one network.' : `Recommendation: put the ${esc(sec.name.toLowerCase())} in access point mode.`}</b>
+      Both routers keep their own Wi-Fi names and coverage, but only the ${esc(main.name.toLowerCase())} hands out addresses. Everything lands on <span class="mono">${esc(mainPre)}.x</span>, so your TV remote app, casting, and Roku/Fire TV discovery work from any room, and port forwarding only has to be set up once.</div></div>
     <div class="card"><h2>What changes</h2>
       <div class="flow">
-        <div class="lab">NOW</div><div class="chain">
-          <div class="node">Den · main router<small>192.168.2.x · “${esc(den.ssid || 'lg2')}”</small></div><span class="arrow">→</span>
-          <div class="node hot">Rec room · router mode<small>192.168.1.x · “${esc(rec.ssid || 'lg')}”</small></div>
-          <span class="verdict" style="color:var(--bad)">Two networks, double NAT</span></div>
-        <div class="lab">AFTER</div><div class="chain">
-          <div class="node ok">Den · main router<small>192.168.2.x · “${esc(den.ssid || 'lg2')}”</small></div><span class="arrow">→</span>
-          <div class="node ok">Rec room · access point<small>192.168.2.x · “${esc(rec.ssid || 'lg')}”</small></div>
-          <span class="verdict" style="color:var(--good)">One network</span></div>
+        <div class="lab">NOW</div><div class="chain">${node(main.name + ' · router', mainPre + '.x' + (main.ssid ? ` · “${main.ssid}”` : ''))}<span class="arrow">→</span>${node(sec.name + ' · router', secPre + '.x' + (sec.ssid ? ` · “${sec.ssid}”` : ''), 'hot')}<span class="verdict" style="color:var(--bad)">Two networks, double NAT</span></div>
+        <div class="lab">AFTER</div><div class="chain">${node(main.name + ' · router', mainPre + '.x' + (main.ssid ? ` · “${main.ssid}”` : ''), 'ok')}<span class="arrow">→</span>${node(sec.name + ' · access point', mainPre + '.x' + (sec.ssid ? ` · “${sec.ssid}”` : ''), 'ok')}<span class="verdict" style="color:var(--good)">One network</span></div>
       </div>
-      <p class="sub">You lose nothing you use: the rec room router stops being a separate firewall and address server, and keeps doing Wi-Fi and its Ethernet ports.</p></div>
+      <p class="sub">You lose nothing you use: the ${esc(sec.name.toLowerCase())} stops being a separate firewall and address server, and keeps doing Wi-Fi and its Ethernet ports.</p></div>
     <div class="card"><h2>Easiest: have HES/EnergyNet do it</h2><div class="sub">Both routers belong to HES/EnergyNet, and they can usually change these Calix units remotely. They may also undo changes you make yourself. Call tech support at <a href="tel:2708870763">270-887-0763</a> and say something like:</div>
-      <p style="background:var(--panel2);border-radius:10px;padding:12px;margin:10px 0 0">“My main router is the GigaCenter 844E-1 in the den. I have a GigaSpire BLAST u6.2 in another room connected by Ethernet. Can you set the GigaSpire up as a bridge / access point so it doesn’t hand out its own addresses, and keep its Wi-Fi name as ‘${esc(rec.ssid || 'lg')}’?”</p></div>
+      <p style="background:var(--panel2);border-radius:10px;padding:12px;margin:10px 0 0">“My main router is the ${esc(main.model || 'fiber router')}. I have a ${esc(sec.model || 'second router')} in another room connected by Ethernet. Can you set the second one up as a bridge / access point so it doesn’t hand out its own addresses${sec.ssid ? `, and keep its Wi-Fi name as ‘${esc(sec.ssid)}’` : ''}?”</p></div>
     <div class="card"><h2>Or do it yourself</h2><div class="sub">Menu names differ between firmware versions, so look for the settings described. If a setting is locked or greyed out, HES manages it and the call above is the way to go.</div>
-      <ol class="steps">${steps.map((s, i) => `<li class="${done[i] ? 'done' : ''}"><input type="checkbox" data-step="${i}" ${done[i] ? 'checked' : ''}><div class="stxt">${s}</div></li>`).join('')}</ol>
+      <ol class="steps">${steps.map((t, i) => `<li class="${done[i] ? 'done' : ''}"><input type="checkbox" data-step="${i}" ${done[i] ? 'checked' : ''}><div class="stxt">${t}</div></li>`).join('')}</ol>
       <div id="verifyOut"></div>
-      <h3>If something goes wrong</h3><p class="sub" style="margin:0">If you lose the router’s admin page, holding its reset button (about 10 seconds) puts it back to router mode with the sticker settings, including the original Wi-Fi name and password. Then set the name “${esc(rec.ssid || 'lg')}” back, or call HES.</p></div>`;
-  document.querySelectorAll('[data-step]').forEach(c => c.onchange = () => { const d = store.get('fixSteps', {}); d[c.dataset.step] = c.checked; store.set('fixSteps', d); c.closest('li').classList.toggle('done', c.checked); });
+      <h3>If something goes wrong</h3><p class="sub" style="margin:0">If you lose the router’s admin page, holding its reset button (about 10 seconds) puts it back to router mode with the settings on its sticker, including the original Wi-Fi name and password. Then set your Wi-Fi name back, or call HES.</p></div>`;
+  document.querySelectorAll('[data-step]').forEach(c => c.onchange = () => { const d = store.get('fixSteps2', {}); d[c.dataset.step] = c.checked; store.set('fixSteps2', d); c.closest('li').classList.toggle('done', c.checked); });
   const mk = $('#markAp'); if (mk) mk.onclick = async () => {
-    const routers = S.settings.routers.map(r => r.id === rec.id ? { ...r, mode: 'ap', lanIp: '192.168.2.2' } : r);
+    const routers = rs.map(r => r.id === sec.id ? { ...r, mode: 'ap', lanIp: target } : r);
     S.settings = await api('/api/settings', { method: 'PUT', body: { routers } }); toast('Marked as access point'); await load(); };
   $('#verifyBtn').onclick = async () => {
-    const out = $('#verifyOut'); out.innerHTML = '<p class="sub"><span class="spin"></span> Rescanning…</p>';
+    $('#verifyOut').innerHTML = '<p class="sub"><span class="spin"></span> Rescanning…</p>';
     await api('/api/scan', { method: 'POST' }); S.scanState.running = true; renderScan(); await pollScan(); show('fix');
-    const A = S.analysis; const nets = A.networks.filter(n => n.scannable);
-    const recDev = S.devices.find(d => d.routerMatch === rec.id && !d.manual && d.online);
-    const ok = !A.nestedRouters.length && nets.length === 1;
+    const A2 = S.analysis; const nets = A2.networks.filter(n => n.scannable && !n.upstream);
+    const ok = !A2.nestedRouters.length && !A2.upstream && nets.length === 1;
     $('#verifyOut').innerHTML = ok
-      ? `<div class="banner good">${ICON.good}<div><b>One network.</b> ${recDev ? `The rec room router answered at <span class="mono">${esc(recDev.ip)}</span> as an access point.` : 'The rec room router didn’t show up by its MAC, which is fine as long as devices on “' + esc(rec.ssid || 'lg') + '” now get 192.168.2.x.'} Grab your phone, join “${esc(rec.ssid || 'lg')}”, and reload this page. The pill at the top should say you’re on the main network.</div></div>`
-      : `<div class="banner bad">${ICON.bad}<div><b>Still seeing a second network.</b> ${A.nestedRouters.length ? 'The rec room router is still running its own network. Check that DHCP is off and the mode saved, or call HES.' : 'This PC sees more than one network.'}</div></div>`;
+      ? `<div class="banner good">${ICON.good}<div><b>One network.</b> This PC is on <span class="mono">${esc(short(nets[0].cidr))}</span> and no second router was detected. Check a device on each Wi-Fi name: both should get <span class="mono">${esc(mainPre)}.x</span> addresses.</div></div>`
+      : `<div class="banner bad">${ICON.bad}<div><b>Still seeing two networks.</b> ${A2.upstream ? `There’s still a router above this PC’s gateway (<span class="mono">${esc(A2.upstream.ip)}</span>).` : A2.nestedRouters.length ? 'A second router is still running its own network.' : 'This PC sees more than one network.'} Check that DHCP is off and the change saved, restart the PC’s network connection, or call HES.</div></div>`;
   };
 }
 
@@ -657,12 +672,13 @@ function renderSettings() {
       <select id="stAuto">${[0, 15, 30, 60, 180, 720].map(m => `<option value="${m}" ${+S.settings.autoScanMinutes === m ? 'selected' : ''}>${m ? `Every ${m < 60 ? m + ' min' : m / 60 + ' h'}` : 'Off'}</option>`).join('')}</select>
       <label class="f">Extra subnets to sweep (one per line, e.g. 192.168.1.0/24)</label>
       <textarea id="stExtra" placeholder="Only useful if this PC can route to them">${esc((S.settings.extraSubnets || []).join('\n'))}</textarea>
+      <label class="row" style="margin-top:12px;gap:8px;font-size:14px"><input type="checkbox" id="stUp" ${S.settings.scanUpstream !== false ? 'checked' : ''}> Sweep the network above my router when one is detected</label>
       <div class="row" style="margin-top:10px"><button class="btn primary" id="stSave">Save</button></div>
       <p class="sub">A quick way to see both sides without changing anything: if the PC has Wi-Fi, connect it to “lg” while the Ethernet stays plugged in. The app scans both networks at once.</p></div>
     <div class="card"><h2>Your data</h2><div class="sub">Labels, history and settings are saved in this app’s data folder, which Server Hub keeps between updates. ${S.scanCount} scans stored.</div>
       <div class="row" style="margin-top:10px"><a class="btn" href="/api/export">Download a backup (JSON)</a></div></div>`;
   $('#stSave').onclick = async () => {
-    try { S.settings = await api('/api/settings', { method: 'PUT', body: { autoScanMinutes: +$('#stAuto').value, extraSubnets: $('#stExtra').value.split(/\s+/).filter(Boolean) } }); toast('Saved'); } catch (e) { toast(e.message); }
+    try { S.settings = await api('/api/settings', { method: 'PUT', body: { scanUpstream: $('#stUp').checked, autoScanMinutes: +$('#stAuto').value, extraSubnets: $('#stExtra').value.split(/\s+/).filter(Boolean) } }); toast('Saved'); } catch (e) { toast(e.message); }
   };
 }
 
