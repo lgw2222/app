@@ -1,0 +1,10 @@
+{
+  "name": "network-map",
+  "version": "1.0.0",
+  "description": "Maps every device on the home network, flags second routers / double NAT, tracks history, runs speed tests and manages UPnP port forwards.",
+  "main": "server.js",
+  "private": true,
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "express": "^4.19.2" },
+  "engines": { "node": ">=18" }
+}

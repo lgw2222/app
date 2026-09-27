@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Network Map</title>
+<meta name="theme-color" content="#0f1216">
+<style>
+:root{
+  --bg:#0f1216; --panel:#171b21; --panel2:#1d2229; --line:#2a313a; --text:#e7ebf0; --dim:#9aa4b1; --faint:#6b7582;
+  --accent:#4da3ff; --accent2:#2b7fd9; --good:#3ecf8e; --warn:#f5b041; --bad:#ff6b6b; --violet:#b48cff;
+  --r:12px; --shadow:0 6px 24px rgba(0,0,0,.35);
+}
+@media (prefers-color-scheme: light){
+  :root{ --bg:#f4f6f9; --panel:#ffffff; --panel2:#f0f3f7; --line:#dde3ea; --text:#141a21; --dim:#566271; --faint:#8a95a3;
+    --accent:#1f74d6; --accent2:#155fb3; --good:#16935f; --warn:#b7730a; --bad:#d23c3c; --violet:#7a4fd6; --shadow:0 6px 24px rgba(20,30,50,.10); }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--accent)}
+a.btn{text-decoration:none;color:inherit}
+.wrap{max-width:1100px;margin:0 auto;padding:0 16px 96px}
+header{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.top{max-width:1100px;margin:0 auto;padding:12px 16px 0;display:flex;align-items:center;gap:12px}
+.brand{font-weight:700;font-size:18px;letter-spacing:.2px;display:flex;align-items:center;gap:8px}
+.brand svg{width:22px;height:22px}
+.grow{flex:1}
+.brand,#scanBtn,.pill{white-space:nowrap}
+@media (max-width:480px){.top{gap:8px}.brand{font-size:16px}#scanBtn{padding:7px 11px}#wherePill{max-width:34vw;overflow:hidden;text-overflow:ellipsis;display:inline-block}}
+.flow{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;margin:12px 0}
+.flow .lab{font-size:12px;font-weight:700;color:var(--dim);letter-spacing:.5px}
+.flow .chain{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.flow .node{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:13px}
+.flow .node small{display:block;color:var(--dim);font-size:11.5px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.flow .node.hot{border-color:var(--bad)} .flow .node.ok{border-color:var(--good)}
+.flow .arrow{color:var(--faint)}
+.flow .verdict{font-size:13px;font-weight:600}
+.tabs{max-width:1100px;margin:0 auto;padding:8px 12px 0;display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{background:none;border:0;padding:9px 12px 11px;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;font-weight:500}
+.tab.on{color:var(--text);border-bottom-color:var(--accent)}
+.tab .dot{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:var(--bad);color:#fff;font-size:11px;line-height:18px;text-align:center;margin-left:4px}
+.btn{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 14px;cursor:pointer;font-weight:500;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{border-color:var(--faint)}
+.btn.primary{background:var(--accent2);border-color:var(--accent2);color:#fff}
+.btn.primary:hover{background:var(--accent)}
+.btn.danger{color:var(--bad)}
+.btn.small{padding:5px 10px;font-size:13px}
+.btn:disabled{opacity:.55;cursor:default}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin:14px 0}
+.card h2{margin:0 0 4px;font-size:16px}
+.card h3{margin:14px 0 6px;font-size:14px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.sub{color:var(--dim);font-size:13px}
+.muted{color:var(--faint)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.banner{border-radius:var(--r);padding:14px 16px;margin:14px 0;border:1px solid;display:flex;gap:12px;align-items:flex-start}
+.banner b{display:block;margin-bottom:2px}
+.banner.bad{background:color-mix(in srgb,var(--bad) 12%,var(--panel));border-color:color-mix(in srgb,var(--bad) 40%,transparent)}
+.banner.warn{background:color-mix(in srgb,var(--warn) 12%,var(--panel));border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+.banner.good{background:color-mix(in srgb,var(--good) 12%,var(--panel));border-color:color-mix(in srgb,var(--good) 40%,transparent)}
+.banner.info{background:color-mix(in srgb,var(--accent) 10%,var(--panel));border-color:color-mix(in srgb,var(--accent) 35%,transparent)}
+.banner .ic{flex:none;width:22px;height:22px;margin-top:1px}
+.pill{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:13px;color:var(--dim)}
+.pill i{width:8px;height:8px;border-radius:50%;background:var(--faint);display:inline-block}
+.pill.good i{background:var(--good)} .pill.warn i{background:var(--warn)} .pill.bad i{background:var(--bad)}
+.badge{display:inline-block;font-size:11px;font-weight:600;padding:1px 7px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--dim);margin-left:4px;vertical-align:1px}
+.badge.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
+.badge.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+.badge.good{color:var(--good);border-color:color-mix(in srgb,var(--good) 45%,transparent)}
+.badge.acc{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+.netgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.net{margin:0}
+.net.hidden{border-style:dashed}
+.nethead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:8px}
+.cidr{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;color:var(--dim)}
+.dev{display:flex;align-items:center;gap:12px;padding:9px 6px;border-top:1px solid var(--line);cursor:pointer;border-radius:8px}
+.dev:hover{background:var(--panel2)}
+.dev.off{opacity:.5}
+.av{flex:none;width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff}
+.dev .t{flex:1;min-width:0}
+.dev .n{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dev .m{font-size:12.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dev .ip{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12.5px;color:var(--dim);flex:none}
+.progress{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden;margin-top:8px}
+.progress div{height:100%;background:var(--accent);width:0;transition:width .3s}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.chip{border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:5px 12px;font-size:13px;cursor:pointer;color:var(--dim)}
+.chip.on{background:var(--accent2);border-color:var(--accent2);color:#fff}
+input[type=text],input[type=search],input:not([type]),select,textarea{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:8px 10px;width:100%;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+textarea{min-height:70px;resize:vertical}
+label.f{display:block;font-size:12.5px;color:var(--dim);margin:10px 0 4px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+@media (max-width:640px){.grid2{grid-template-columns:1fr}}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;color:var(--dim);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.4px;padding:8px 6px;border-bottom:1px solid var(--line)}
+td{padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+.tscroll{overflow-x:auto}
+.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12.5px}
+.big{font-size:30px;font-weight:700;line-height:1.1}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.stat{background:var(--panel2);border-radius:10px;padding:12px}
+.stat .l{font-size:12px;color:var(--dim)}
+.ev{display:flex;gap:10px;padding:9px 0;border-top:1px solid var(--line);align-items:flex-start}
+.ev .when{flex:none;width:112px;color:var(--faint);font-size:12.5px}
+.ev .what{flex:1}
+.strip{display:flex;gap:2px;margin-top:6px;flex-wrap:wrap}
+.strip span{width:9px;height:18px;border-radius:2px;background:var(--panel2)}
+.steps{counter-reset:s;list-style:none;padding:0;margin:8px 0}
+.steps li{counter-increment:s;position:relative;padding:10px 0 10px 40px;border-top:1px solid var(--line)}
+.steps li::before{content:counter(s);position:absolute;left:0;top:9px;width:26px;height:26px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);display:grid;place-items:center;font-size:13px;font-weight:700;color:var(--dim)}
+.steps li.done::before{content:"✓";background:var(--good);border-color:var(--good);color:#fff}
+.steps li.done .stxt{color:var(--dim)}
+.steps input[type=checkbox]{float:right;width:18px;height:18px;margin:2px 0 0 10px}
+.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40;display:none}
+.sheet{position:fixed;z-index:41;right:0;top:0;bottom:0;width:min(480px,100%);background:var(--panel);border-left:1px solid var(--line);box-shadow:var(--shadow);overflow-y:auto;padding:18px 18px 40px;transform:translateX(100%);transition:transform .2s}
+.sheet.open{transform:none}
+.sheet-bg.open{display:block}
+.kv{display:grid;grid-template-columns:120px 1fr;gap:4px 10px;font-size:13.5px;margin-top:8px}
+.kv div:nth-child(odd){color:var(--dim)}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:500;z-index:60;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw}
+.toast.show{opacity:1}
+.empty{color:var(--dim);text-align:center;padding:24px 8px}
+.spin{width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .8s linear infinite;display:inline-block}
+@keyframes sp{to{transform:rotate(360deg)}}
+.hide{display:none!important}
+.diagram{width:100%;max-width:620px;display:block;margin:10px auto}
+.diagram text{fill:var(--text);font-size:12px}
+.diagram .dimt{fill:var(--dim);font-size:11px}
+.diagram rect.box{fill:var(--panel2);stroke:var(--line)}
+.diagram rect.hot{stroke:var(--bad)}
+.diagram rect.ok{stroke:var(--good)}
+.diagram line,.diagram path{stroke:var(--faint);stroke-width:2;fill:none}
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M12 11.5 6.5 17M12 11.5l5.5 5.5"/></svg>
+      Network Map
+    </div>
+    <div class="grow"></div>
+    <span id="wherePill" class="pill hide"></span>
+    <button id="scanBtn" class="btn primary">Scan now</button>
+  </div>
+  <nav class="tabs" id="tabs"></nav>
+</header>
+
+<main class="wrap">
+  <div id="scanBox" class="card hide">
+    <div class="row"><span class="spin"></span><b id="scanPhase">Scanning…</b><span class="sub" id="scanCount"></span></div>
+    <div class="progress"><div id="scanBar"></div></div>
+  </div>
+
+  <section id="v-overview"></section>
+  <section id="v-devices" class="hide"></section>
+  <section id="v-routers" class="hide"></section>
+  <section id="v-history" class="hide"></section>
+  <section id="v-speed" class="hide"></section>
+  <section id="v-wifi" class="hide"></section>
+  <section id="v-ports" class="hide"></section>
+  <section id="v-fix" class="hide"></section>
+  <section id="v-settings" class="hide"></section>
+</main>
+
+<div class="sheet-bg" id="sheetBg"></div>
+<aside class="sheet" id="sheet"></aside>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const api = async (url, opts = {}) => {
+  const o = { ...opts, headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) } };
+  if (o.body && typeof o.body !== 'string') o.body = JSON.stringify(o.body);
+  const r = await fetch(url, o);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+};
+const store = { get(k, d) { try { const v = localStorage.getItem('nm:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+                set(k, v) { try { localStorage.setItem('nm:' + k, JSON.stringify(v)); } catch {} } };
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2600); }
+const ago = ts => { if (!ts) return 'never'; const s = (Date.now() - ts) / 1000; if (s < 60) return 'just now'; if (s < 3600) return Math.floor(s / 60) + ' min ago'; if (s < 86400) return Math.floor(s / 3600) + ' h ago'; return Math.floor(s / 86400) + ' d ago'; };
+const when = ts => new Date(ts).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+const short = cidr => { if (!cidr) return 'unknown'; const [n, p] = cidr.split('/'); return p === '24' ? n.split('.').slice(0, 3).join('.') + '.x' : cidr; };
+
+let S = null;           // server state
+let tab = store.get('tab', 'overview');
+const TABS = [['overview','Overview'],['devices','Devices'],['routers','Routers'],['history','History'],['speed','Speed'],['wifi','Wi-Fi'],['ports','Ports'],['fix','Fix it'],['settings','Settings']];
+
+const router = id => (S?.settings.routers || []).find(r => r.id === id);
+const routerLabel = id => { const r = router(id); return r ? r.name : ''; };
+const devName = d => d.label || d.autoName || d.ip || 'Unknown';
+const devKind = d => d.kindOverride || d.kind || 'Unknown';
+const netName = n => { const r = router(n.router); return r ? `${r.room || r.name} network` : (n.scannable ? 'Main network' : 'Hidden network'); };
+
+const KIND_COLORS = [[/router|access point|network/i,'#7a5af8'],[/roku|fire|google tv|chromecast|smart tv|android tv/i,'#e0567a'],[/pc|windows|this pc/i,'#2b7fd9'],
+  [/apple|phone|tablet/i,'#5f6b7a'],[/speaker|sonos|airplay/i,'#16a085'],[/printer/i,'#8e6e3b'],[/smart home/i,'#d4880f'],[/xbox|playstation|nintendo/i,'#2e9e4f']];
+const kindColor = k => (KIND_COLORS.find(([re]) => re.test(k)) || [0,'#56606c'])[1];
+const initials = d => { const k = devKind(d); if (/roku/i.test(k)) return 'RK'; if (/fire/i.test(k)) return 'FT'; if (/google|chromecast/i.test(k)) return 'G'; if (/router|access/i.test(k)) return 'RT'; if (/this pc/i.test(k)) return 'PC';
+  const w = devName(d).replace(/[^A-Za-z0-9 ]/g,'').trim().split(/\s+/); return ((w[0]||'?')[0] + (w[1]?.[0] || '')).toUpperCase(); };
+
+/* ---------------------------------------------------------------- tabs */
+function renderTabs() {
+  const moved = S ? S.analysis.movedCount : 0;
+  $('#tabs').innerHTML = TABS.map(([k, l]) => `<button class="tab ${k === tab ? 'on' : ''}" data-tab="${k}">${l}${k === 'devices' && moved ? `<span class="dot">${moved}</span>` : ''}${k === 'fix' && S?.analysis.doubleNat ? '<span class="dot">!</span>' : ''}</button>`).join('');
+}
+$('#tabs').addEventListener('click', e => { const b = e.target.closest('.tab'); if (!b) return; show(b.dataset.tab); });
+function show(t) {
+  tab = t; store.set('tab', t);
+  for (const [k] of TABS) $('#v-' + k).classList.toggle('hide', k !== t);
+  renderTabs(); render();
+  window.scrollTo({ top: 0 });
+}
+
+/* ---------------------------------------------------------------- data + scan */
+async function load() {
+  S = await api('/api/state');
+  renderTabs(); renderWhere(); renderScan(); render();
+  if (S.scanState.running) pollScan();
+}
+let polling = false;
+async function pollScan() {
+  if (polling) return; polling = true;
+  try {
+    while (true) {
+      const st = await api('/api/scan/status');
+      S.scanState = st; renderScan();
+      if (!st.running) break;
+      await new Promise(r => setTimeout(r, 700));
+    }
+    await load();
+    if (S.scanState.error) toast('Scan hit an error. Check the Server Hub log.');
+  } finally { polling = false; }
+}
+$('#scanBtn').onclick = async () => { await api('/api/scan', { method: 'POST' }); S.scanState.running = true; renderScan(); pollScan(); };
+function renderScan() {
+  const st = S?.scanState || {};
+  $('#scanBox').classList.toggle('hide', !st.running);
+  $('#scanBtn').disabled = !!st.running;
+  $('#scanBtn').textContent = st.running ? 'Scanning…' : 'Scan now';
+  if (st.running) {
+    $('#scanPhase').textContent = st.phase || 'Scanning…';
+    $('#scanCount').textContent = st.total ? `${st.done} of ${st.total} addresses` : '';
+    $('#scanBar').style.width = st.total ? (100 * st.done / st.total).toFixed(0) + '%' : '8%';
+  }
+}
+function renderWhere() {
+  const w = S.who, p = $('#wherePill');
+  p.classList.remove('hide', 'good', 'warn', 'bad');
+  if (w.self) { p.classList.add('good'); p.innerHTML = '<i></i>On this PC'; }
+  else if (w.viaRouter) { p.classList.add('warn'); p.innerHTML = `<i></i>Via ${esc(w.viaRouter.ssid ? '"' + w.viaRouter.ssid + '"' : w.viaRouter.name)}`; }
+  else { p.classList.add('good'); p.innerHTML = `<i></i>${esc(w.device ? devName(w.device) : 'On ' + short(w.network))}`; }
+}
+
+function render() {
+  if (!S) return;
+  ({ overview: renderOverview, devices: renderDevices, routers: renderRouters, history: renderHistory, speed: renderSpeed,
+     wifi: renderWifi, ports: renderPorts, fix: renderFix, settings: renderSettings })[tab]();
+}
+
+/* ---------------------------------------------------------------- overview */
+const ICON = {
+  bad: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--bad)" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18h.01"/></svg>',
+  warn: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5h.01"/></svg>',
+  good: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--good)" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>',
+  info: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/></svg>'
+};
+function devRow(d) {
+  const badges = [];
+  if (d.moved && !d.moved.acked) badges.push('<span class="badge bad">moved</span>');
+  if (d.nestedRouter) badges.push('<span class="badge warn">own network</span>');
+  if (d.possibleRouter) badges.push('<span class="badge warn">router?</span>');
+  if (!d.manual && d.online && d.responds === false) badges.push('<span class="badge">silent</span>');
+  if (d.randomMac) badges.push('<span class="badge">private MAC</span>');
+  if (d.manual) badges.push('<span class="badge acc">added by hand</span>');
+  const meta = [devKind(d), d.vendor && !devKind(d).toLowerCase().includes(d.vendor.toLowerCase().split(' ')[0]) ? d.vendor : '', d.router ? '@ ' + (routerLabel(d.router) || d.router) : '', d.room].filter(Boolean).join(' · ');
+  return `<div class="dev ${d.online === false ? 'off' : ''}" data-key="${esc(d.key)}">
+    <div class="av" style="background:${kindColor(devKind(d))}">${esc(initials(d))}</div>
+    <div class="t"><div class="n">${esc(devName(d))}${badges.join('')}</div><div class="m">${esc(meta)}</div></div>
+    <div class="ip">${esc(d.ip || '—')}</div></div>`;
+}
+document.addEventListener('click', e => { const r = e.target.closest('.dev[data-key]'); if (r) openDevice(r.dataset.key); });
+
+function renderOverview() {
+  const A = S.analysis, devs = S.devices.filter(d => !d.hidden);
+  let h = '';
+  const w = S.who;
+  if (w.viaRouter) h += `<div class="banner warn">${ICON.warn}<div><b>You’re connected through the ${esc(w.viaRouter.name)}${w.viaRouter.ssid ? ` (“${esc(w.viaRouter.ssid)}”)` : ''}.</b>
+     Your device is on that router’s own network, so this PC can’t see it, and TV apps on this PC can’t reach devices on your side. Your requests still get through because the router passes them along (double NAT).</div></div>`;
+
+  if (!S.lastScan) h += `<div class="banner info">${ICON.info}<div><b>No scan yet.</b> The first scan starts on its own a few seconds after launch, or press <b>Scan now</b>. It takes about 15–30 seconds.</div></div>`;
+  else if (A.nestedRouters.length) {
+    for (const n of A.nestedRouters) {
+      const r = router(n.router); const hidden = A.networks.find(x => !x.scannable && x.via === n.key);
+      h += `<div class="banner bad">${ICON.bad}<div><b>Two networks are in play.</b>
+        The ${esc(r ? r.name : 'second router')}${r?.model ? ` (${esc(r.model)})` : ''} at <span class="mono">${esc(n.ip)}</span> is running its own network${hidden?.cidr ? ` (<span class="mono">${esc(short(hidden.cidr))}</span>)` : ''}.
+        Anything on its Wi-Fi${r?.ssid ? ` “${esc(r.ssid)}”` : ''} is behind double NAT: this PC can’t see it or reach it, casting and TV remotes won’t cross over, and port forwarding would have to be set up twice.
+        <div class="row" style="margin-top:10px"><button class="btn small primary" onclick="show('fix')">How to fix it</button></div></div></div>`;
+    }
+  } else if (A.possibleRouters.length) {
+    const d = S.devices.find(x => x.key === A.possibleRouters[0]);
+    h += `<div class="banner warn">${ICON.warn}<div><b>Possible second router at <span class="mono">${esc(d?.ip)}</span>.</b> It’s network equipment (${esc(d?.vendor)}) that isn’t your gateway. If it has its own Wi-Fi, check the Routers tab and set its MAC hint so the app can tell for sure.</div></div>`;
+  } else if (A.networks.filter(n => n.scannable).length > 1) {
+    h += `<div class="banner info">${ICON.info}<div><b>This PC is on ${A.networks.filter(n=>n.scannable).length} networks at once</b> (for example Ethernet and Wi-Fi). Both are scanned and shown below.</div></div>`;
+  } else {
+    h += `<div class="banner good">${ICON.good}<div><b>One network.</b> Every device found is on the same network, so everything can reach everything.</div></div>`;
+  }
+  const moved = devs.filter(d => d.moved && !d.moved.acked);
+  if (moved.length) h += `<div class="card"><h2>Moved to a different network</h2><div class="sub">These showed up on a different subnet than last time. That’s what silently breaks local apps.</div>
+      ${moved.map(d => `<div class="ev"><div class="when">${ago(d.moved.at)}</div><div class="what"><b>${esc(devName(d))}</b><br><span class="sub mono">${esc(d.moved.fromIp || '')} (${esc(short(d.moved.from))}) → ${esc(d.moved.toIp || '')} (${esc(short(d.moved.to))})</span></div><button class="btn small" onclick="ackMove('${esc(d.key)}')">Got it</button></div>`).join('')}</div>`;
+
+  // network cards
+  h += '<div class="netgrid">';
+  for (const n of A.networks) {
+    const list = devs.filter(d => n.scannable ? d.cidr === n.cidr && !d.manual : (d.manual && (d.cidr === n.cidr || (!d.cidr && d.router === n.router))));
+    const manualHere = n.scannable ? devs.filter(d => d.manual && d.cidr === n.cidr) : [];
+    const on = [...list, ...manualHere].filter(d => d.online !== false).sort(sortDev);
+    const off = list.filter(d => d.online === false).sort(sortDev);
+    const r = router(n.router);
+    h += `<div class="card net ${n.scannable ? '' : 'hidden'}"><div class="nethead"><div><h2>${esc(netName(n))}</h2>
+      <div class="cidr">${esc(short(n.cidr))}${n.gateway ? ` · gateway ${esc(n.gateway)}` : ''}${r?.ssid ? ` · Wi-Fi “${esc(r.ssid)}”` : ''}</div></div>
+      ${n.scannable ? `<span class="pill good"><i></i>${on.length} online</span>` : `<span class="pill warn"><i></i>can’t scan</span>`}</div>`;
+    if (!n.scannable) h += `<div class="sub" style="margin-bottom:8px">${n.viaIp ? `Behind the router at <span class="mono">${esc(n.viaIp)}</span>. ` : ''}This PC can’t look inside it. Add the devices you know are on this side so the map stays complete.</div>`;
+    h += on.map(devRow).join('') || (n.scannable ? '<div class="empty">Nothing found.</div>' : '');
+    if (off.length) h += `<details style="margin-top:6px"><summary class="sub" style="cursor:pointer;padding:6px 0">${off.length} offline</summary>${off.map(devRow).join('')}</details>`;
+    if (!n.scannable) h += `<div class="row" style="margin-top:10px"><button class="btn small" onclick="addManual('${esc(n.router || '')}','${esc(n.cidr ? n.cidr.split('/')[0].split('.').slice(0,3).join('.') + '.' : '')}')">+ Add a device on this side</button></div>`;
+    h += '</div>';
+  }
+  h += '</div>';
+  if (S.lastScan) h += `<p class="sub" style="margin-top:14px">Last scan ${ago(S.lastScan.at)} (${(S.lastScan.ms / 1000).toFixed(0)}s, ${S.lastScan.count} devices). ${S.settings.autoScanMinutes ? `Scans every ${S.settings.autoScanMinutes} min.` : 'Auto-scan is off.'}</p>`;
+  $('#v-overview').innerHTML = h;
+}
+const KIND_ORDER = k => /this pc/i.test(k) ? 0 : /router \(gateway/i.test(k) ? 1 : /router|access/i.test(k) ? 2 : 3;
+const sortDev = (a, b) => KIND_ORDER(devKind(a)) - KIND_ORDER(devKind(b)) || (a.label ? 0 : 1) - (b.label ? 0 : 1) || ipNum(a.ip) - ipNum(b.ip);
+const ipNum = ip => (ip || '999.999.999.999').split('.').reduce((a, o) => a * 256 + (+o || 0), 0);
+async function ackMove(key) { await api(`/api/devices/${encodeURIComponent(key)}/ack`, { method: 'POST' }); await load(); }
+
+/* ---------------------------------------------------------------- devices */
+let devFilter = 'all', devQuery = '';
+function renderDevices() {
+  const f = { all: () => true, online: d => d.online !== false, offline: d => d.online === false, unlabeled: d => !d.label, moved: d => d.moved && !d.moved.acked, manual: d => d.manual };
+  const q = devQuery.toLowerCase();
+  const list = S.devices.filter(f[devFilter]).filter(d => !q || [devName(d), d.ip, d.mac, d.vendor, d.hostname, devKind(d), d.room, routerLabel(d.router)].join(' ').toLowerCase().includes(q)).sort(sortDev);
+  const counts = k => S.devices.filter(f[k]).length;
+  const chips = [['all','All'],['online','Online'],['offline','Offline'],['unlabeled','Unlabeled'],['moved','Moved'],['manual','Added by hand']];
+  $('#v-devices').innerHTML = `<div class="card">
+    <div class="row"><input type="search" id="devQ" placeholder="Search name, IP, MAC, vendor…" value="${esc(devQuery)}" style="flex:1;min-width:200px"><button class="btn" onclick="addManual('','')">+ Add by hand</button></div>
+    <div class="chips">${chips.map(([k, l]) => `<button class="chip ${devFilter === k ? 'on' : ''}" data-f="${k}">${l} ${counts(k)}</button>`).join('')}</div>
+    ${list.map(d => devRow(d).replace('<div class="ip">', `<div class="ip">${d.cidr ? `<span class="muted">${esc(short(d.cidr))}</span><br>` : ''}`)).join('') || '<div class="empty">No devices match.</div>'}
+    <p class="sub" style="margin-top:12px">Tip: phones and tablets use a different private MAC for each Wi-Fi name, so one iPad can show up twice. Open one and use <b>Merge into</b> to combine them.</p></div>`;
+  $('#devQ').oninput = e => { devQuery = e.target.value; const pos = e.target.selectionStart; renderDevices(); const i = $('#devQ'); i.focus(); i.setSelectionRange(pos, pos); };
+  document.querySelectorAll('#v-devices .chip').forEach(c => c.onclick = () => { devFilter = c.dataset.f; renderDevices(); });
+}
+
+/* ---------------------------------------------------------------- device sheet */
+function closeSheet() { $('#sheet').classList.remove('open'); $('#sheetBg').classList.remove('open'); }
+$('#sheetBg').onclick = closeSheet;
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
+function routerOptions(sel) { return `<option value="">—</option>` + S.settings.routers.map(r => `<option value="${esc(r.id)}" ${r.id === sel ? 'selected' : ''}>${esc(r.name)}${r.ssid ? ` (“${esc(r.ssid)}”)` : ''}</option>`).join(''); }
+async function openDevice(key) {
+  const d = S.devices.find(x => x.key === key); if (!d) return;
+  const kv = [['IP', d.ip], ['Network', d.cidr ? short(d.cidr) + (d.gateway ? ` via ${d.gateway}` : '') : ''], ['MAC', d.mac + (d.randomMac ? ' (private / randomized)' : '')], ['Other MACs', (d.otherMacs || []).join(', ')],
+    ['Vendor', d.vendor], ['Hostname', d.hostname], ['Detected as', d.kind], ['Responds', d.manual ? '' : d.responds ? `yes${d.rtt != null ? ` · ${d.rtt} ms` : ''}${d.ttl ? ` · TTL ${d.ttl}` : ''}` : 'no (seen in ARP table only)'],
+    ['Open ports', (d.open || []).join(', ')], ['Announces', (d.services || []).map(s => s.replace(/^_|\._tcp$/g, '')).join(', ')],
+    ['UPnP', (d.upnp || []).map(u => [u.friendlyName, u.model].filter(Boolean).join(' – ')).filter(Boolean).join('; ')],
+    ['Roku', d.roku ? [d.roku.name, d.roku.model, d.roku.connection && `${d.roku.connection}${d.roku.wifi ? ' “' + d.roku.wifi + '”' : ''}`].filter(Boolean).join(' · ') : ''],
+    ['Cast', d.cast ? [d.cast.name, d.cast.model].filter(Boolean).join(' · ') : ''],
+    ['First seen', d.firstSeen ? when(d.firstSeen) : ''], ['Last seen', d.lastSeen ? `${when(d.lastSeen)} (${ago(d.lastSeen)})` : d.manual ? 'added by hand' : '']].filter(([, v]) => v);
+  const others = S.devices.filter(x => x.key !== key).sort((a, b) => devName(a).localeCompare(devName(b)));
+  $('#sheet').innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(devName(d))}</h2><button class="btn small" onclick="closeSheet()">Close</button></div>
+    ${d.moved && !d.moved.acked ? `<div class="banner bad" style="margin-top:12px">${ICON.bad}<div><b>Moved networks ${ago(d.moved.at)}</b><span class="mono">${esc(d.moved.fromIp)} → ${esc(d.moved.toIp)}</span><div style="margin-top:8px"><button class="btn small" onclick="ackMove('${esc(key)}').then(closeSheet)">Got it</button></div></div></div>` : ''}
+    <label class="f">Your label</label><input id="fLabel" value="${esc(d.label || '')}" placeholder="${esc(d.autoName || 'e.g. Fire Stick – rec room')}">
+    <div class="grid2">
+      <div><label class="f">Connected to</label><select id="fRouter">${routerOptions(d.router)}</select></div>
+      <div><label class="f">Room</label><input id="fRoom" value="${esc(d.room || '')}" placeholder="e.g. Den"></div>
+    </div>
+    <label class="f">Type</label><input id="fKind" value="${esc(d.kindOverride || '')}" placeholder="${esc(d.kind || '')}">
+    ${d.manual ? `<div class="grid2"><div><label class="f">IP address</label><input id="fIp" value="${esc(d.ip || '')}"></div><div><label class="f">MAC (optional)</label><input id="fMac" value="${esc(d.mac || '')}"></div></div>` : ''}
+    <label class="f">Notes</label><textarea id="fNotes">${esc(d.notes || '')}</textarea>
+    <label class="row" style="margin-top:10px;gap:8px;font-size:13.5px"><input type="checkbox" id="fHidden" ${d.hidden ? 'checked' : ''}> Hide from the overview</label>
+    <div class="row" style="margin-top:14px"><button class="btn primary" id="fSave">Save</button></div>
+    <h3>Details</h3><div class="kv">${kv.map(([k, v]) => `<div>${esc(k)}</div><div class="${/IP|MAC|ports/.test(k) ? 'mono' : ''}">${esc(v)}</div>`).join('')}</div>
+    ${d.manual ? '' : `<h3>Presence (last 96 scans)</h3><div id="strip" class="strip"><span class="spin"></span></div><div class="sub" id="stripKey" style="margin-top:6px"></div>`}
+    <h3>Tidy up</h3>
+    <div class="row"><select id="fMerge" style="flex:1;min-width:180px"><option value="">Merge into…</option>${others.map(o => `<option value="${esc(o.key)}">${esc(devName(o))} · ${esc(o.ip || '')}</option>`).join('')}</select><button class="btn" id="fMergeBtn">Merge</button></div>
+    <div class="sub" style="margin-top:6px">Merging keeps the other device’s history and labels and treats both MACs as one device from now on.</div>
+    <div class="row" style="margin-top:12px"><button class="btn danger" id="fForget">Forget this device</button></div>`;
+  $('#sheet').classList.add('open'); $('#sheetBg').classList.add('open'); $('#sheet').scrollTop = 0;
+  $('#fSave').onclick = async () => {
+    const body = { label: $('#fLabel').value.trim(), router: $('#fRouter').value, room: $('#fRoom').value.trim(), kindOverride: $('#fKind').value.trim(), notes: $('#fNotes').value, hidden: $('#fHidden').checked };
+    if (d.manual) { body.ip = $('#fIp').value.trim(); body.mac = $('#fMac').value.trim(); }
+    try { await api(`/api/devices/${encodeURIComponent(key)}`, { method: 'PATCH', body }); toast('Saved'); closeSheet(); await load(); } catch (e) { toast(e.message); }
+  };
+  $('#fMergeBtn').onclick = async () => { const into = $('#fMerge').value; if (!into) return toast('Pick a device to merge into');
+    try { await api(`/api/devices/${encodeURIComponent(key)}/merge`, { method: 'POST', body: { into } }); toast('Merged'); closeSheet(); await load(); } catch (e) { toast(e.message); } };
+  $('#fForget').onclick = async () => { if (!$('#fForget').dataset.sure) { $('#fForget').dataset.sure = 1; $('#fForget').textContent = 'Tap again to forget'; return; }
+    await api(`/api/devices/${encodeURIComponent(key)}`, { method: 'DELETE' }); toast('Forgotten'); closeSheet(); await load(); };
+  if (!d.manual) {
+    const hist = await api(`/api/history/device/${encodeURIComponent(key)}`);
+    const cidrs = [...new Set(hist.filter(x => !x.absent).map(x => x.cidr))];
+    const pal = ['var(--good)', 'var(--violet)', 'var(--warn)', 'var(--accent)'];
+    $('#strip').innerHTML = hist.map(x => `<span title="${esc(when(x.at))}${x.absent ? ' – not seen' : ' – ' + x.ip}" style="background:${x.absent ? 'var(--panel2)' : pal[cidrs.indexOf(x.cidr) % pal.length]};${x.responds === false ? 'opacity:.5' : ''}"></span>`).join('') || '<span class="sub">No history yet.</span>';
+    $('#stripKey').innerHTML = cidrs.map((c, i) => `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${pal[i % pal.length]};margin-right:4px"></span>${esc(short(c))}`).join(' &nbsp; ') + (cidrs.length > 1 ? ' &nbsp; <b style="color:var(--bad)">seen on more than one network</b>' : '');
+  }
+}
+function addManual(routerId, ipPrefix) {
+  $('#sheet').innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">Add a device by hand</h2><button class="btn small" onclick="closeSheet()">Close</button></div>
+    <p class="sub">For devices the scan can’t see, like the ones behind the rec room router. You can find the IP on the device itself (Fire TV: Settings → My Fire TV → About → Network).</p>
+    <label class="f">Name</label><input id="mLabel" placeholder="e.g. Fire Stick – rec room">
+    <div class="grid2"><div><label class="f">IP address</label><input id="mIp" value="${esc(ipPrefix)}" placeholder="192.168.1.62"></div><div><label class="f">MAC (optional)</label><input id="mMac"></div></div>
+    <div class="grid2"><div><label class="f">Connected to</label><select id="mRouter">${routerOptions(routerId)}</select></div><div><label class="f">Room</label><input id="mRoom"></div></div>
+    <label class="f">Type</label><input id="mKind" placeholder="e.g. Fire TV">
+    <div class="row" style="margin-top:14px"><button class="btn primary" id="mSave">Add</button></div>`;
+  $('#sheet').classList.add('open'); $('#sheetBg').classList.add('open');
+  $('#mSave').onclick = async () => {
+    try { await api('/api/devices', { method: 'POST', body: { label: $('#mLabel').value.trim(), ip: $('#mIp').value.trim(), mac: $('#mMac').value.trim(), router: $('#mRouter').value, room: $('#mRoom').value.trim(), kind: $('#mKind').value.trim() || undefined } });
+      toast('Added'); closeSheet(); await load(); } catch (e) { toast(e.message); }
+  };
+}
+
+/* ---------------------------------------------------------------- routers */
+function routerStatus(r) {
+  const d = S.devices.find(x => x.routerMatch === r.id && !x.manual) || S.devices.find(x => x.isGateway && x.ip === r.lanIp);
+  if (!d) return { text: 'Not seen in the last scan from this PC.', cls: '' };
+  if (d.isGateway) return { text: `Gateway for ${short(d.cidr)} · ${d.online !== false ? 'online' : 'offline'}`, cls: 'good', d };
+  if (d.nestedRouter) return { text: `Found at ${d.ip} on ${short(d.cidr)}, running its own network behind it (double NAT)`, cls: 'bad', d };
+  return { text: `Found at ${d.ip} as an access point on ${short(d.cidr)}`, cls: 'good', d };
+}
+function renderRouters() {
+  const dn = S.lastDoubleNat;
+  let h = S.settings.routers.map((r, i) => { const st = routerStatus(r); return `<div class="card" data-ri="${i}">
+    <div class="row" style="justify-content:space-between"><div><h2>${esc(r.name)}</h2><div class="sub">${esc(r.model)}${r.room ? ' · ' + esc(r.room) : ''}</div></div>
+    <span class="pill ${st.cls}"><i></i>${r.role === 'main' ? 'Main' : r.mode === 'ap' ? 'Access point' : 'Second router'}</span></div>
+    <p class="sub" style="margin:10px 0 0">${esc(st.text)}${st.d?.mac ? ` · <span class="mono">${esc(st.d.mac)}</span>` : ''}</p>
+    <div class="row" style="margin-top:10px"><a class="btn small" href="http://${esc(r.lanIp)}" target="_blank" rel="noopener">Open admin page</a><span class="sub">Only opens while you’re connected to ${r.ssid ? '“' + esc(r.ssid) + '”' : 'this router'}${r.mode === 'ap' ? ' or the main network' : ''}.</span></div>
+    <details style="margin-top:10px"><summary class="sub" style="cursor:pointer">Edit</summary>
+    <div class="grid2">
+      <div><label class="f">Name</label><input data-k="name" value="${esc(r.name)}"></div>
+      <div><label class="f">Model</label><input data-k="model" value="${esc(r.model)}"></div>
+      <div><label class="f">Room</label><input data-k="room" value="${esc(r.room)}"></div>
+      <div><label class="f">Wi-Fi name</label><input data-k="ssid" value="${esc(r.ssid)}"></div>
+      <div><label class="f">Its own address (LAN IP)</label><input data-k="lanIp" value="${esc(r.lanIp)}"></div>
+      <div><label class="f">MAC hint (first 5 bytes)</label><input data-k="macHint" value="${esc(r.macHint)}"></div>
+      <div><label class="f">Role</label><select data-k="role"><option value="main" ${r.role === 'main' ? 'selected' : ''}>Main (connects to internet)</option><option value="second" ${r.role !== 'main' ? 'selected' : ''}>Second</option></select></div>
+      <div><label class="f">Mode</label><select data-k="mode"><option value="router" ${r.mode !== 'ap' ? 'selected' : ''}>Router (own network)</option><option value="ap" ${r.mode === 'ap' ? 'selected' : ''}>Access point (shares main network)</option></select></div>
+    </div><label class="f">Notes</label><textarea data-k="notes">${esc(r.notes)}</textarea>
+    <div class="row" style="margin-top:10px"><button class="btn primary small" onclick="saveRouters()">Save routers</button></div></details></div>`; }).join('');
+  h += `<div class="card"><h2>Double NAT check</h2><div class="sub">Checks your public IP, what the den router thinks its internet address is (via UPnP), and how many private hops it takes to reach the internet. Takes about 15 seconds.</div>
+    <div class="row" style="margin-top:10px"><button class="btn primary" id="dnBtn">Run check</button>${dn ? `<span class="sub">Last run ${ago(dn.at)}</span>` : ''}</div><div id="dnOut">${dn ? dnHtml(dn) : ''}</div></div>`;
+  $('#v-routers').innerHTML = h;
+  $('#dnBtn').onclick = async () => { const b = $('#dnBtn'); b.disabled = true; b.innerHTML = '<span class="spin"></span> Checking…';
+    try { const r = await api('/api/doublenat', { method: 'POST' }); S.lastDoubleNat = r; $('#dnOut').innerHTML = dnHtml(r); } catch (e) { toast(e.message); } b.disabled = false; b.textContent = 'Run check'; };
+}
+function dnHtml(r) {
+  const lines = [];
+  if (r.nested?.length) lines.push(`<div class="banner bad">${ICON.bad}<div><b>Devices on ${r.nested.map(n => esc(routerLabel(n.router) || n.name)).join(', ')} are double NATed.</b> That router sits behind the den router and runs its own network. This PC itself is ${r.pcDoubleNat ? '<b>also</b> double NATed' : 'not double NATed'}.</div></div>`);
+  else if (r.pcDoubleNat) lines.push(`<div class="banner bad">${ICON.bad}<div><b>This PC is double NATed.</b> There are ${r.privateHops} private hops before the internet.</div></div>`);
+  else lines.push(`<div class="banner good">${ICON.good}<div><b>No double NAT from this PC.</b></div></div>`);
+  if (r.cgnat) lines.push(`<div class="banner warn">${ICON.warn}<div><b>Your ISP uses carrier-grade NAT (100.64.x.x).</b> Port forwarding from the internet won’t work no matter what you set at home. Ask HES/EnergyNet for a public IP if you need it.</div></div>`);
+  lines.push(`<div class="kv"><div>Public IP</div><div class="mono">${esc(r.publicIp || 'unknown')}</div><div>Router WAN IP</div><div class="mono">${esc(r.routerWanIp || (r.igd ? 'router didn’t say' : 'UPnP off / not found'))}</div>
+    ${r.igd ? `<div>UPnP router</div><div>${esc([r.igd.name, r.igd.model].filter(Boolean).join(' – '))} <span class="mono">${esc(r.igd.ip)}</span></div>` : ''}
+    <div>Path out</div><div class="mono">${(r.hops || []).map(h => esc(h.ip || '*')).join(' → ') || '—'}</div></div>`);
+  if (r.publicIp && r.routerWanIp && r.publicIp === r.routerWanIp) lines.push('<p class="sub">The den router has your public IP directly, so it’s the only NAT for devices on its network.</p>');
+  return lines.join('');
+}
+async function saveRouters() {
+  const routers = S.settings.routers.map((r, i) => { const card = document.querySelector(`[data-ri="${i}"]`); const o = { ...r };
+    card.querySelectorAll('[data-k]').forEach(el => o[el.dataset.k] = el.value.trim()); return o; });
+  try { S.settings = await api('/api/settings', { method: 'PUT', body: { routers } }); toast('Routers saved'); await load(); } catch (e) { toast(e.message); }
+}
+
+/* ---------------------------------------------------------------- history */
+let evFilter = 'moved';
+async function renderHistory() {
+  const map = { moved: ['moved'], changes: ['moved', 'ip-changed'], arrivals: ['new', 'gone', 'back'], all: null };
+  const evs = S.events.filter(e => !map[evFilter] || map[evFilter].includes(e.type));
+  const byKey = k => S.devices.find(d => d.key === k);
+  const txt = e => { const d = byKey(e.key); const n = `<b>${esc(d ? devName(d) : e.ip || e.key)}</b>`;
+    return { moved: `${n} moved from <span class="mono">${esc(e.fromIp)} (${esc(short(e.from))})</span> to <span class="mono">${esc(e.toIp)} (${esc(short(e.to))})</span>`,
+      'ip-changed': `${n} changed IP <span class="mono">${esc(e.from)} → ${esc(e.to)}</span>`, new: `${n} joined for the first time <span class="mono">${esc(e.ip)}</span>`,
+      gone: `${n} went offline`, back: `${n} came back <span class="mono">${esc(e.ip)}</span>` }[e.type] || esc(e.type); };
+  let h = `<div class="card"><h2>What changed</h2><div class="chips">${[['moved','Network moves'],['changes','Moves + IP changes'],['arrivals','Joins & leaves'],['all','Everything']].map(([k, l]) => `<button class="chip ${evFilter === k ? 'on' : ''}" data-e="${k}">${l}</button>`).join('')}</div>
+    ${evs.slice(0, 120).map(e => `<div class="ev"><div class="when">${when(e.at)}</div><div class="what">${txt(e)}</div></div>`).join('') || '<div class="empty">Nothing here yet. Changes show up after a few scans.</div>'}</div>
+    <div class="card"><h2>Scans</h2><div id="scanList"><span class="spin"></span></div></div>`;
+  $('#v-history').innerHTML = h;
+  document.querySelectorAll('#v-history .chip').forEach(c => c.onclick = () => { evFilter = c.dataset.e; renderHistory(); });
+  const scans = await api('/api/history?limit=150');
+  $('#scanList').innerHTML = scans.length ? `<div class="tscroll"><table><tr><th>When</th><th>Devices by network</th><th>Second router</th><th>Changes</th></tr>
+    ${scans.map(s => `<tr><td>${when(s.at)}<div class="sub">${esc(s.trigger)} · ${(s.ms / 1000).toFixed(0)}s</div></td><td>${Object.entries(s.perNetwork).map(([c, n]) => `<span class="mono">${esc(short(c))}</span> ${n}`).join('<br>')}</td>
+    <td>${s.nested.length ? s.nested.map(n => `<span class="badge warn">${esc(routerLabel(n.router) || n.ip)}</span>`).join('') : '<span class="muted">—</span>'}</td>
+    <td>${s.events.length ? Object.entries(s.events.reduce((a, e) => (a[e.type] = (a[e.type] || 0) + 1, a), {})).map(([t, n]) => `<span class="badge ${t === 'moved' ? 'bad' : ''}">${n} ${esc(t)}</span>`).join('') : '<span class="muted">—</span>'}</td></tr>`).join('')}</table></div>` : '<div class="empty">No scans yet.</div>';
+}
+
+/* ---------------------------------------------------------------- speed */
+async function renderSpeed() {
+  const w = S.who;
+  const where = w.self ? 'this PC' : w.viaRouter ? `the ${w.viaRouter.name}${w.viaRouter.ssid ? ` (“${w.viaRouter.ssid}”)` : ''}` : `the ${short(w.network)} network`;
+  $('#v-speed').innerHTML = `<div class="card"><h2>Test this device’s connection</h2>
+    <div class="sub">Measures the link between the device you’re holding and the PC, which is basically your Wi-Fi speed in this spot. You’re connected through ${esc(where)}. Run it in different rooms on “lg” and “lg2” to compare.</div>
+    <label class="f">Where are you? (optional)</label><input id="spLabel" placeholder="e.g. Couch in the den" value="${esc(store.get('spLabel', ''))}">
+    <div class="row" style="margin-top:10px"><button class="btn primary" id="spLan">Run Wi-Fi / LAN test</button><span class="sub" id="spLanMsg"></span></div>
+    <div class="stats" id="spLanOut"></div></div>
+    <div class="card"><h2>Internet speed from the PC</h2><div class="sub">Runs on the PC over its wired connection (Cloudflare test servers). Uses about 150–250 MB.</div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="spNet">Run internet test</button><span class="sub" id="spNetMsg"></span></div><div class="stats" id="spNetOut"></div></div>
+    <div class="card"><h2>Results</h2><div id="spHist"><span class="spin"></span></div></div>`;
+  $('#spLabel').oninput = e => store.set('spLabel', e.target.value);
+  $('#spLan').onclick = runLanTest;
+  $('#spNet').onclick = async () => { const b = $('#spNet'); b.disabled = true; $('#spNetMsg').innerHTML = '<span class="spin"></span> Testing (about 20s)…';
+    try { const r = await api('/api/speed/internet', { method: 'POST' }); if (!r.ok) throw new Error(r.reason); $('#spNetOut').innerHTML = statHtml(r); $('#spNetMsg').textContent = ''; loadSpeedHist(); }
+    catch (e) { $('#spNetMsg').textContent = e.message; } b.disabled = false; };
+  loadSpeedHist();
+}
+const statHtml = r => `<div class="stat"><div class="l">Download</div><div class="big">${r.down ?? '—'}</div><div class="l">Mbps</div></div><div class="stat"><div class="l">Upload</div><div class="big">${r.up ?? '—'}</div><div class="l">Mbps</div></div><div class="stat"><div class="l">Ping</div><div class="big">${r.ping ?? '—'}</div><div class="l">ms</div></div>`;
+async function runLanTest() {
+  const b = $('#spLan'), msg = $('#spLanMsg'); b.disabled = true;
+  try {
+    msg.innerHTML = '<span class="spin"></span> Ping…';
+    const pings = [];
+    for (let i = 0; i < 10; i++) { const t = performance.now(); await fetch('/api/speed/ping?' + Math.random(), { cache: 'no-store' }); pings.push(performance.now() - t); }
+    pings.sort((a, b) => a - b); const ping = Math.round(pings[Math.floor(pings.length / 2)]);
+    msg.innerHTML = '<span class="spin"></span> Download…';
+    let bytes = 0; const t0 = performance.now(); const deadline = t0 + 7000; const ac = new AbortController();
+    const dl = async () => { try { const r = await fetch('/api/speed/down?mb=200&r=' + Math.random(), { cache: 'no-store', signal: ac.signal }); const rd = r.body.getReader();
+      while (true) { const { done, value } = await rd.read(); if (done) break; bytes += value.length; if (performance.now() > deadline) { ac.abort(); break; } } } catch {} };
+    await Promise.all([dl(), dl(), dl()]);
+    const down = +(bytes * 8 / ((performance.now() - t0) / 1000) / 1e6).toFixed(1);
+    msg.innerHTML = '<span class="spin"></span> Upload…';
+    let upBytes = 0; const u0 = performance.now(); const blob = new Blob([new Uint8Array(8 * 1024 * 1024).map(() => Math.random() * 256)]);
+    while (performance.now() - u0 < 6000 && upBytes < 160e6) { const r = await fetch('/api/speed/up', { method: 'POST', body: blob, headers: { 'Content-Type': 'application/octet-stream' } }); const j = await r.json(); upBytes += j.bytes; }
+    const up = +(upBytes * 8 / ((performance.now() - u0) / 1000) / 1e6).toFixed(1);
+    $('#spLanOut').innerHTML = statHtml({ down, up, ping });
+    await api('/api/speed/results', { method: 'POST', body: { down, up, ping, label: $('#spLabel').value.trim() } });
+    msg.textContent = ''; loadSpeedHist();
+  } catch (e) { msg.textContent = 'Test failed: ' + e.message; }
+  b.disabled = false;
+}
+async function loadSpeedHist() {
+  const rows = await api('/api/speed/results');
+  $('#spHist').innerHTML = rows.length ? `<div class="tscroll"><table><tr><th>When</th><th>Where</th><th>Down</th><th>Up</th><th>Ping</th></tr>${rows.map(r => `<tr><td>${when(r.at)}</td><td>${esc(r.label || '')}${r.label ? '<br>' : ''}<span class="sub">${esc(r.kind === 'internet' ? 'Internet · ' + r.where : r.where)}</span></td><td>${r.down}</td><td>${r.up}</td><td>${r.ping ?? '—'}</td></tr>`).join('')}</table></div>` : '<div class="empty">No results yet.</div>';
+}
+
+/* ---------------------------------------------------------------- wi-fi */
+let wifiData = null;
+function renderWifi() {
+  $('#v-wifi').innerHTML = `<div class="card"><h2>Wi-Fi channel check</h2><div class="sub">Uses the PC’s Wi-Fi adapter (if it has one) to list nearby networks and spot channel overlap between “lg”, “lg2” and your neighbors. You change channels on each router’s admin page.</div>
+    <div class="row" style="margin-top:10px"><button class="btn primary" id="wfBtn">Scan Wi-Fi</button></div><div id="wfOut">${wifiData ? wifiHtml(wifiData) : ''}</div></div>
+    <div class="card"><h2>Speed tips for your setup</h2><ul class="sub" style="margin:6px 0 0;padding-left:18px">
+      <li>The rec room GigaSpire BLAST u6.2 is Wi-Fi 6 and the den GigaCenter 844E-1 is older Wi-Fi 5, so faster devices will do better on “lg”.</li>
+      <li>Keep TVs and streaming sticks on 5 GHz when they’re close to a router. 2.4 GHz reaches farther but is slower and more crowded.</li>
+      <li>Anything that doesn’t move (PC, consoles, TVs near a router) is faster and steadier on Ethernet.</li>
+      <li>If both routers use the same Wi-Fi name and password, phones hand off between them on their own. Separate names (what you have now) mean you choose.</li>
+      <li>Use the Speed tab from your phone in each room to see where coverage drops off.</li></ul></div>`;
+  $('#wfBtn').onclick = async () => { const b = $('#wfBtn'); b.disabled = true; b.innerHTML = '<span class="spin"></span> Scanning…';
+    try { wifiData = await api('/api/wifi'); $('#wfOut').innerHTML = wifiHtml(wifiData); } catch (e) { toast(e.message); } b.disabled = false; b.textContent = 'Scan Wi-Fi'; };
+}
+function wifiHtml(w) {
+  if (!w.ok) return `<div class="banner warn" style="margin-top:12px">${ICON.warn}<div>${esc(w.reason)}</div></div>`;
+  const mine = new Set(w.mine);
+  let h = '';
+  if (w.current?.ssid) h += `<p class="sub" style="margin-top:12px">PC Wi-Fi: <b>${esc(w.current.ssid)}</b>${w.current.channel ? ` · channel ${w.current.channel}` : ''}${w.current.signal ? ` · ${w.current.signal}% signal` : ''}${w.current.rx ? ` · ${w.current.rx} Mbps link` : ''}</p>`;
+  h += w.advice.length ? w.advice.map(a => `<div class="banner warn">${ICON.warn}<div>${esc(a)}</div></div>`).join('') : `<div class="banner good">${ICON.good}<div>No channel problems spotted.</div></div>`;
+  h += `<div class="tscroll"><table><tr><th>Network</th><th>Band</th><th>Ch</th><th>Signal</th><th>Radio</th></tr>${w.aps.map(a => `<tr style="${mine.has((a.ssid || '').toLowerCase()) ? 'font-weight:600' : ''}"><td>${esc(a.ssid || '(hidden)')}${mine.has((a.ssid || '').toLowerCase()) ? ' <span class="badge acc">yours</span>' : ''}<div class="mono sub">${esc(a.bssid)}</div></td><td>${esc(a.band)}</td><td>${a.channel}${a.best && a.best !== a.channel ? ` <span class="badge warn">try ${a.best}</span>` : ''}</td><td>${a.signal}%</td><td>${esc(a.radio)}</td></tr>`).join('')}</table></div>`;
+  return h;
+}
+
+/* ---------------------------------------------------------------- ports */
+function renderPorts() {
+  $('#v-ports').innerHTML = `<div class="card"><h2>Port forwarding (UPnP)</h2><div class="sub">Lists and changes port forwards on the den router over UPnP, with no router login. Needs UPnP turned on in the router. If it’s off, add forwards on the router’s admin page instead.</div>
+    ${S.analysis.nestedRouters.length ? `<div class="banner warn">${ICON.warn}<div>Forwards only reach devices on the den router’s network. A device behind the rec room router would need a second forward on that router too. Switching it to access point mode fixes that.</div></div>` : ''}
+    ${S.lastDoubleNat?.cgnat ? `<div class="banner bad">${ICON.bad}<div>Your ISP uses carrier-grade NAT, so forwards won’t be reachable from the internet.</div></div>` : ''}
+    <div id="upOut" style="margin-top:12px"><span class="spin"></span> Asking the router…</div></div>`;
+  loadUpnp();
+}
+async function loadUpnp() {
+  let r; try { r = await api('/api/upnp'); } catch (e) { $('#upOut').textContent = e.message; return; }
+  if (!r.ok) { $('#upOut').innerHTML = `<div class="banner warn">${ICON.warn}<div>${esc(r.reason)}</div></div>`; return; }
+  const targets = S.devices.filter(d => d.online !== false && !d.manual && d.ip && S.analysis.networks.some(n => n.scannable && n.cidr === d.cidr && n.gateway === r.igd.ip)).sort(sortDev);
+  $('#upOut').innerHTML = `<p class="sub">Router: <b>${esc([r.igd.name, r.igd.model].filter(Boolean).join(' – ') || r.igd.ip)}</b> · internet address <span class="mono">${esc(r.externalIp || 'unknown')}</span></p>
+    <div class="tscroll"><table><tr><th>Outside port</th><th>Goes to</th><th>Proto</th><th>Description</th><th></th></tr>
+    ${r.mappings.map(m => { const d = S.devices.find(x => x.ip === m.internalClient && !x.manual); return `<tr><td class="mono">${m.externalPort}</td><td>${esc(d ? devName(d) : '')}<div class="mono sub">${esc(m.internalClient)}:${m.internalPort}</div></td><td>${esc(m.protocol)}</td><td>${esc(m.description)}${m.lease ? `<div class="sub">expires in ${Math.round(m.lease / 60)} min</div>` : ''}</td><td><button class="btn small danger" data-del="${m.externalPort}|${esc(m.protocol)}|${esc(m.remoteHost)}">Remove</button></td></tr>`; }).join('') || '<tr><td colspan="5" class="muted">No forwards yet.</td></tr>'}</table></div>
+    <h3>Add a forward</h3>
+    <div class="grid2"><div><label class="f">Device</label><select id="pfDev">${targets.map(d => `<option value="${esc(d.ip)}">${esc(devName(d))} · ${esc(d.ip)}</option>`).join('')}</select></div>
+    <div><label class="f">Protocol</label><select id="pfProto"><option>TCP</option><option>UDP</option></select></div>
+    <div><label class="f">Outside port</label><input id="pfExt" inputmode="numeric" placeholder="e.g. 8211"></div><div><label class="f">Device port</label><input id="pfInt" inputmode="numeric" placeholder="same as outside"></div></div>
+    <label class="f">Description</label><input id="pfDesc" placeholder="e.g. Palworld server">
+    <div class="row" style="margin-top:10px"><button class="btn primary" id="pfAdd">Add forward</button></div>`;
+  $('#pfAdd').onclick = async () => { try { await api('/api/upnp/add', { method: 'POST', body: { internalClient: $('#pfDev').value, protocol: $('#pfProto').value, externalPort: $('#pfExt').value, internalPort: $('#pfInt').value || $('#pfExt').value, description: $('#pfDesc').value } }); toast('Forward added'); loadUpnp(); } catch (e) { toast(e.message); } };
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { const [externalPort, protocol, remoteHost] = b.dataset.del.split('|');
+    try { await api('/api/upnp/delete', { method: 'POST', body: { externalPort, protocol, remoteHost } }); toast('Removed'); loadUpnp(); } catch (e) { toast(e.message); } });
+}
+
+/* ---------------------------------------------------------------- fix it */
+function renderFix() {
+  const rec = S.settings.routers.find(r => r.role !== 'main') || {}; const den = S.settings.routers.find(r => r.role === 'main') || {};
+  const done = store.get('fixSteps', {});
+  const isAp = rec.mode === 'ap';
+  const nested = S.analysis.nestedRouters.length > 0;
+  const steps = [
+    `Write down the rec room router’s current Wi-Fi name (“${esc(rec.ssid || 'lg')}”) and password so you can put them back if anything resets.`,
+    `Connect your phone or laptop to “${esc(rec.ssid || 'lg')}”, open <a href="http://${esc(rec.lanIp || '192.168.1.1')}" target="_blank" rel="noopener">http://${esc(rec.lanIp || '192.168.1.1')}</a> and sign in. The username and password are on the sticker under the router, unless someone changed them.`,
+    `Look for an <b>operating mode</b>, <b>bridge</b> or <b>access point</b> setting. If there is one, pick it and skip to step 6. If not, keep going.`,
+    `Find the LAN / DHCP settings and <b>turn the DHCP server off</b>.`,
+    `Change the router’s own LAN address to <b class="mono">192.168.2.2</b> (mask 255.255.255.0). If it asks for a gateway or DNS, use <span class="mono">${esc(den.lanIp || '192.168.2.1')}</span>. Save. The page will stop loading, which is expected because it moved.`,
+    `Check the cable from the den: it has to be in one of the rec room router’s <b>LAN</b> ports, not the WAN/internet port. The PC can stay in another LAN port.`,
+    `Turn Wi-Fi off and back on for devices on “${esc(rec.ssid || 'lg')}” (or restart the Fire Stick). They should now get 192.168.2.x addresses.`,
+    `Tell this app it’s done: <button class="btn small" id="markAp" ${isAp ? 'disabled' : ''}>${isAp ? 'Marked as access point' : 'Mark rec room router as access point (192.168.2.2)'}</button>`,
+    `Press <button class="btn small primary" id="verifyBtn">Verify</button>. It rescans and confirms there’s only one network.`
+  ];
+  $('#v-fix').innerHTML = `
+    <div class="banner ${nested ? 'bad' : isAp ? 'good' : 'info'}">${nested ? ICON.bad : isAp ? ICON.good : ICON.info}<div><b>${nested ? 'Right now you have two networks.' : isAp ? 'You’re on one network.' : 'Recommendation: put the rec room router in access point mode.'}</b>
+      Both routers keep their own Wi-Fi names and coverage, but only the den router hands out addresses. Everything lands on ${esc(short(den.lanIp ? den.lanIp.split('.').slice(0,3).join('.') + '.0/24' : '192.168.2.0/24'))}, so your TV remote app, casting, and Roku/Fire TV discovery work from any room, and port forwarding only has to be set up once.</div></div>
+    <div class="card"><h2>What changes</h2>
+      <div class="flow">
+        <div class="lab">NOW</div><div class="chain">
+          <div class="node">Den · main router<small>192.168.2.x · “${esc(den.ssid || 'lg2')}”</small></div><span class="arrow">→</span>
+          <div class="node hot">Rec room · router mode<small>192.168.1.x · “${esc(rec.ssid || 'lg')}”</small></div>
+          <span class="verdict" style="color:var(--bad)">Two networks, double NAT</span></div>
+        <div class="lab">AFTER</div><div class="chain">
+          <div class="node ok">Den · main router<small>192.168.2.x · “${esc(den.ssid || 'lg2')}”</small></div><span class="arrow">→</span>
+          <div class="node ok">Rec room · access point<small>192.168.2.x · “${esc(rec.ssid || 'lg')}”</small></div>
+          <span class="verdict" style="color:var(--good)">One network</span></div>
+      </div>
+      <p class="sub">You lose nothing you use: the rec room router stops being a separate firewall and address server, and keeps doing Wi-Fi and its Ethernet ports.</p></div>
+    <div class="card"><h2>Easiest: have HES/EnergyNet do it</h2><div class="sub">Both routers belong to HES/EnergyNet, and they can usually change these Calix units remotely. They may also undo changes you make yourself. Call tech support at <a href="tel:2708870763">270-887-0763</a> and say something like:</div>
+      <p style="background:var(--panel2);border-radius:10px;padding:12px;margin:10px 0 0">“My main router is the GigaCenter 844E-1 in the den. I have a GigaSpire BLAST u6.2 in another room connected by Ethernet. Can you set the GigaSpire up as a bridge / access point so it doesn’t hand out its own addresses, and keep its Wi-Fi name as ‘${esc(rec.ssid || 'lg')}’?”</p></div>
+    <div class="card"><h2>Or do it yourself</h2><div class="sub">Menu names differ between firmware versions, so look for the settings described. If a setting is locked or greyed out, HES manages it and the call above is the way to go.</div>
+      <ol class="steps">${steps.map((s, i) => `<li class="${done[i] ? 'done' : ''}"><input type="checkbox" data-step="${i}" ${done[i] ? 'checked' : ''}><div class="stxt">${s}</div></li>`).join('')}</ol>
+      <div id="verifyOut"></div>
+      <h3>If something goes wrong</h3><p class="sub" style="margin:0">If you lose the router’s admin page, holding its reset button (about 10 seconds) puts it back to router mode with the sticker settings, including the original Wi-Fi name and password. Then set the name “${esc(rec.ssid || 'lg')}” back, or call HES.</p></div>`;
+  document.querySelectorAll('[data-step]').forEach(c => c.onchange = () => { const d = store.get('fixSteps', {}); d[c.dataset.step] = c.checked; store.set('fixSteps', d); c.closest('li').classList.toggle('done', c.checked); });
+  const mk = $('#markAp'); if (mk) mk.onclick = async () => {
+    const routers = S.settings.routers.map(r => r.id === rec.id ? { ...r, mode: 'ap', lanIp: '192.168.2.2' } : r);
+    S.settings = await api('/api/settings', { method: 'PUT', body: { routers } }); toast('Marked as access point'); await load(); };
+  $('#verifyBtn').onclick = async () => {
+    const out = $('#verifyOut'); out.innerHTML = '<p class="sub"><span class="spin"></span> Rescanning…</p>';
+    await api('/api/scan', { method: 'POST' }); S.scanState.running = true; renderScan(); await pollScan(); show('fix');
+    const A = S.analysis; const nets = A.networks.filter(n => n.scannable);
+    const recDev = S.devices.find(d => d.routerMatch === rec.id && !d.manual && d.online);
+    const ok = !A.nestedRouters.length && nets.length === 1;
+    $('#verifyOut').innerHTML = ok
+      ? `<div class="banner good">${ICON.good}<div><b>One network.</b> ${recDev ? `The rec room router answered at <span class="mono">${esc(recDev.ip)}</span> as an access point.` : 'The rec room router didn’t show up by its MAC, which is fine as long as devices on “' + esc(rec.ssid || 'lg') + '” now get 192.168.2.x.'} Grab your phone, join “${esc(rec.ssid || 'lg')}”, and reload this page. The pill at the top should say you’re on the main network.</div></div>`
+      : `<div class="banner bad">${ICON.bad}<div><b>Still seeing a second network.</b> ${A.nestedRouters.length ? 'The rec room router is still running its own network. Check that DHCP is off and the mode saved, or call HES.' : 'This PC sees more than one network.'}</div></div>`;
+  };
+}
+
+/* ---------------------------------------------------------------- settings */
+function renderSettings() {
+  $('#v-settings').innerHTML = `<div class="card"><h2>Open on your phone or iPad</h2><div class="sub">Works from either Wi-Fi. From “lg” it only works because the rec room router passes your request out to the den network.</div>
+    ${S.urls.map(u => `<p class="mono" style="margin:8px 0 0"><a href="${esc(u)}">${esc(u)}</a></p>`).join('')}</div>
+    <div class="card"><h2>Scanning</h2>
+      <label class="f">Scan automatically (builds your history)</label>
+      <select id="stAuto">${[0, 15, 30, 60, 180, 720].map(m => `<option value="${m}" ${+S.settings.autoScanMinutes === m ? 'selected' : ''}>${m ? `Every ${m < 60 ? m + ' min' : m / 60 + ' h'}` : 'Off'}</option>`).join('')}</select>
+      <label class="f">Extra subnets to sweep (one per line, e.g. 192.168.1.0/24)</label>
+      <textarea id="stExtra" placeholder="Only useful if this PC can route to them">${esc((S.settings.extraSubnets || []).join('\n'))}</textarea>
+      <div class="row" style="margin-top:10px"><button class="btn primary" id="stSave">Save</button></div>
+      <p class="sub">A quick way to see both sides without changing anything: if the PC has Wi-Fi, connect it to “lg” while the Ethernet stays plugged in. The app scans both networks at once.</p></div>
+    <div class="card"><h2>Your data</h2><div class="sub">Labels, history and settings are saved in this app’s data folder, which Server Hub keeps between updates. ${S.scanCount} scans stored.</div>
+      <div class="row" style="margin-top:10px"><a class="btn" href="/api/export">Download a backup (JSON)</a></div></div>`;
+  $('#stSave').onclick = async () => {
+    try { S.settings = await api('/api/settings', { method: 'PUT', body: { autoScanMinutes: +$('#stAuto').value, extraSubnets: $('#stExtra').value.split(/\s+/).filter(Boolean) } }); toast('Saved'); } catch (e) { toast(e.message); }
+  };
+}
+
+load().catch(e => { $('#v-overview').innerHTML = `<div class="banner bad">${ICON.bad}<div><b>Can’t reach the Network Map server.</b> ${esc(e.message)}</div></div>`; });
+setInterval(() => { if (!polling && document.visibilityState === 'visible' && !$('#sheet').classList.contains('open')) api('/api/state').then(s => { const prevScan = S?.lastScan?.id; S = s; renderTabs(); renderWhere(); renderScan(); if (s.scanState.running) pollScan(); else if (s.lastScan?.id !== prevScan && ['overview','devices'].includes(tab)) render(); }).catch(() => {}); }, 20000);
+</script>
+</body>
+</html>
