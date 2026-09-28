@@ -317,7 +317,7 @@ function renderOverview() {
     h += `<div class="banner good">${ICON.good}<div><b>One network.</b> Every device found is on the same network, so everything can reach everything.</div></div>`;
   }
   const moved = devs.filter(d => d.moved && !d.moved.acked);
-  if (moved.length) h += `<div class="card"><h2>Moved to a different network</h2><div class="sub">These showed up on a different subnet than last time. That’s what silently breaks local apps.</div>
+  if (moved.length) h += `<div class="card"><div class="row" style="justify-content:space-between"><h2>Moved to a different network</h2><button class="btn small" onclick="ackAll()">Got it, all ${moved.length}</button></div><div class="sub">These showed up on a different subnet than last time. That’s what silently breaks local apps. If you just changed your router setup on purpose, this is expected.</div>
       ${moved.map(d => `<div class="ev"><div class="when">${ago(d.moved.at)}</div><div class="what"><b>${esc(devName(d))}</b><br><span class="sub mono">${esc(d.moved.fromIp || '')} (${esc(short(d.moved.from))}) → ${esc(d.moved.toIp || '')} (${esc(short(d.moved.to))})</span></div><button class="btn small" onclick="ackMove('${esc(d.key)}')">Got it</button></div>`).join('')}</div>`;
 
   // network cards
@@ -345,6 +345,8 @@ function renderOverview() {
 const KIND_ORDER = k => /this pc/i.test(k) ? 0 : /router \(gateway/i.test(k) ? 1 : /router|access/i.test(k) ? 2 : 3;
 const sortDev = (a, b) => KIND_ORDER(devKind(a)) - KIND_ORDER(devKind(b)) || (a.label ? 0 : 1) - (b.label ? 0 : 1) || ipNum(a.ip) - ipNum(b.ip);
 const ipNum = ip => (ip || '999.999.999.999').split('.').reduce((a, o) => a * 256 + (+o || 0), 0);
+async function ackAll() { await api('/api/moved/ack-all', { method: 'POST' }); toast('Cleared'); await load(); }
+async function tidyUp(forgetOld) { const r = await api('/api/cleanup', { method: 'POST', body: { forgetOld } }); toast(`Merged ${r.merged} duplicates${forgetOld ? `, removed ${r.forgotten} old entries` : ''}`); await load(); }
 async function ackMove(key) { await api(`/api/devices/${encodeURIComponent(key)}/ack`, { method: 'POST' }); await load(); }
 
 /* ---------------------------------------------------------------- devices */
@@ -676,7 +678,9 @@ function renderSettings() {
       <div class="row" style="margin-top:10px"><button class="btn primary" id="stSave">Save</button></div>
       <p class="sub">A quick way to see both sides without changing anything: if the PC has Wi-Fi, connect it to “lg” while the Ethernet stays plugged in. The app scans both networks at once.</p></div>
     <div class="card"><h2>Your data</h2><div class="sub">Labels, history and settings are saved in this app’s data folder, which Server Hub keeps between updates. ${S.scanCount} scans stored.</div>
-      <div class="row" style="margin-top:10px"><a class="btn" href="/api/export">Download a backup (JSON)</a></div></div>`;
+      <div class="row" style="margin-top:10px"><a class="btn" href="/api/export">Download a backup (JSON)</a></div></div>
+    <div class="card"><h2>Tidy up</h2><div class="sub">Merge duplicate entries left over from before the network change, and optionally remove unlabeled offline devices from networks that no longer exist (like the old 192.168.2.x).</div>
+      <div class="row" style="margin-top:10px"><button class="btn" onclick="tidyUp(false)">Merge duplicates</button><button class="btn" onclick="tidyUp(true)">Merge + remove old entries</button><button class="btn" onclick="ackAll()">Clear all “moved” flags</button></div></div>`;
   $('#stSave').onclick = async () => {
     try { S.settings = await api('/api/settings', { method: 'PUT', body: { scanUpstream: $('#stUp').checked, autoScanMinutes: +$('#stAuto').value, extraSubnets: $('#stExtra').value.split(/\s+/).filter(Boolean) } }); toast('Saved'); } catch (e) { toast(e.message); }
   };

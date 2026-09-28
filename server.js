@@ -650,9 +650,21 @@ async function runScan(trigger = 'manual') {
       });
     }
     for (const rec of Object.values(db.devices)) {
-      if (rec.manual || seen.has(rec.key) || !scanned.includes(rec.cidr)) continue;
-      if (rec.online) events.push({ type: 'gone', key: rec.key, ip: rec.ip, at: now });
+      if (rec.manual || seen.has(rec.key)) continue;
+      // only log "gone" for networks we actually swept; devices on networks that no longer exist just go offline quietly
+      if (rec.online && scanned.includes(rec.cidr)) events.push({ type: 'gone', key: rec.key, ip: rec.ip, at: now });
       rec.online = false;
+    }
+    // tidy up: an IP-only record (seen across a router, no MAC) is replaced by the real device now seen at that IP
+    for (const d of devices) {
+      if (!d.mac) continue;
+      const k = 'ip:' + d.ip;
+      if (!db.devices[k] || k === d.key || !db.devices[d.key]) continue;
+      const a = db.devices[k], b = db.devices[d.key];
+      for (const f of ['label', 'router', 'room', 'notes', 'kindOverride']) if (!b[f] && a[f]) b[f] = a[f];
+      b.firstSeen = Math.min(a.firstSeen || now, b.firstSeen || now);
+      db.aliases[k] = d.key;
+      delete db.devices[k];
     }
     history.scans.push({
       id: scanId, at: now, trigger, ms: now - scanState.startedAt,
@@ -945,6 +957,29 @@ app.post('/api/devices/:key/ack', (req, res) => {
   const rec = db.devices[resolveKey(req.params.key)];
   if (rec && rec.moved) rec.moved.acked = true;
   saveDb(); res.json({ ok: true });
+});
+app.post('/api/moved/ack-all', (req, res) => {
+  let n = 0;
+  for (const d of Object.values(db.devices)) if (d.moved && !d.moved.acked) { d.moved.acked = true; n++; }
+  saveDb(); res.json({ ok: true, count: n });
+});
+app.post('/api/cleanup', (req, res) => {
+  const last = history.scans[history.scans.length - 1];
+  const live = new Set(last ? last.networks.map(n => n.cidr) : []);
+  let merged = 0, forgotten = 0;
+  for (const a of Object.values(db.devices)) {
+    if (!a.key.startsWith('ip:') || !db.devices[a.key]) continue;
+    const b = Object.values(db.devices).find(x => x.mac && x.ip === a.ip && x.key !== a.key);
+    if (b) {
+      for (const f of ['label', 'router', 'room', 'notes', 'kindOverride']) if (!b[f] && a[f]) b[f] = a[f];
+      db.aliases[a.key] = b.key; delete db.devices[a.key]; merged++;
+    }
+  }
+  for (const d of Object.values(db.devices)) if (!d.manual && d.cidr && !live.has(d.cidr)) d.online = false;
+  if (req.body && req.body.forgetOld) for (const d of Object.values(db.devices)) {
+    if (!d.manual && !d.online && !d.label && d.cidr && !live.has(d.cidr)) { delete db.devices[d.key]; forgotten++; }
+  }
+  saveDb(); res.json({ ok: true, merged, forgotten });
 });
 app.post('/api/devices/:key/merge', (req, res) => {
   const from = resolveKey(req.params.key), into = resolveKey(req.body.into || '');
