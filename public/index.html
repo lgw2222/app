@@ -316,6 +316,7 @@ function renderOverview() {
   } else {
     h += `<div class="banner good">${ICON.good}<div><b>One network.</b> Every device found is on the same network, so everything can reach everything.</div></div>`;
   }
+  if (A.selfExtraIps && A.selfExtraIps.length) h += `<div class="banner info">${ICON.info}<div><b>This PC is connected twice</b> (wired and Wi-Fi, also at <span class="mono">${esc(A.selfExtraIps.join(', '))}</span>). It works, but turning the PC’s Wi-Fi off keeps Server Hub at one address and keeps traffic on the faster wired link.</div></div>`;
   const moved = devs.filter(d => d.moved && !d.moved.acked);
   if (moved.length) h += `<div class="card"><div class="row" style="justify-content:space-between"><h2>Moved to a different network</h2><button class="btn small" onclick="ackAll()">Got it, all ${moved.length}</button></div><div class="sub">These showed up on a different subnet than last time. That’s what silently breaks local apps. If you just changed your router setup on purpose, this is expected.</div>
       ${moved.map(d => `<div class="ev"><div class="when">${ago(d.moved.at)}</div><div class="what"><b>${esc(devName(d))}</b><br><span class="sub mono">${esc(d.moved.fromIp || '')} (${esc(short(d.moved.from))}) → ${esc(d.moved.toIp || '')} (${esc(short(d.moved.to))})</span></div><button class="btn small" onclick="ackMove('${esc(d.key)}')">Got it</button></div>`).join('')}</div>`;

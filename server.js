@@ -46,8 +46,8 @@ const DEFAULT_ROUTERS = [
   },
   {
     id: 'rec', name: 'Rec room router', model: 'Calix GigaSpire BLAST u6.2 (GS4227E)', room: 'Rec room', ssid: 'lg',
-    lanIp: '192.168.2.1', mode: 'router', role: 'second', macHint: '04:bc:9f:02:d1',
-    notes: 'Wi-Fi 6 (EXOS). Fed by the Ethernet run from the den. Runs its own 192.168.2.x network behind the den router.'
+    lanIp: '192.168.2.1', mode: 'ap', role: 'second', macHint: '04:bc:9f:02:d1',
+    notes: 'Wi-Fi 6 (EXOS). Access point: DHCP off, den cable in a LAN port. Admin page stays at 192.168.2.1.'
   }
 ];
 const DEFAULT_SETTINGS = { autoScanMinutes: 30, extraSubnets: [], routers: DEFAULT_ROUTERS };
@@ -570,7 +570,8 @@ async function runScan(trigger = 'manual') {
     const traceP = primaryGw ? traceroute('1.1.1.1', 3) : Promise.resolve([]);
     const discoP = Promise.all([mdnsDiscover(ifaceIps), ssdpDiscover(ifaceIps)]);
     const hostList = [];
-    for (const s of subnets) for (const ip of hostsIn(s)) if (ip !== s.hostIp) hostList.push({ ip, subnet: s });
+    const myIps = new Set(localIps());
+    for (const s of subnets) for (const ip of hostsIn(s)) if (ip !== s.hostIp && !myIps.has(ip)) hostList.push({ ip, subnet: s });
     scanState.total = hostList.length;
     const probes = await pool(hostList, 40, async h => { const r = await probeHost(h.ip); scanState.done++; return { ...r, subnet: h.subnet }; });
 
@@ -599,12 +600,13 @@ async function runScan(trigger = 'manual') {
     const arp = await readArp();
     const cands = new Map();
     for (const p of probes) if (p && p.alive) cands.set(p.ip, p);
+    for (const ip of myIps) if (!subnets.some(s => s.hostIp === ip)) arp.delete(ip);
     const subOf = ip => subnets.find(s => inSubnet(ip, s.cidr));
     for (const [ip] of arp) if (!cands.has(ip)) {
       const s = subOf(ip);
       if (s && hostsIn(s).includes(ip)) cands.set(ip, { ip, alive: false, open: [], subnet: s });
     }
-    for (const ip of [...Object.keys(mdns), ...Object.keys(ssdp)]) if (!cands.has(ip)) { const s = subOf(ip); if (s) cands.set(ip, { ip, alive: true, open: [], subnet: s }); }
+    for (const ip of [...Object.keys(mdns), ...Object.keys(ssdp)]) if (!cands.has(ip) && !(myIps.has(ip) && !subnets.some(s => s.hostIp === ip))) { const s = subOf(ip); if (s) cands.set(ip, { ip, alive: true, open: [], subnet: s }); }
     for (const s of subnets) if (s.hostIp && !cands.has(s.hostIp)) cands.set(s.hostIp, { ip: s.hostIp, alive: true, open: [], subnet: s });
 
     scanState.phase = 'Identifying devices';
@@ -640,6 +642,7 @@ async function runScan(trigger = 'manual') {
           events.push(mv); rec.moved = mv;
         } else if (rec.ip && rec.ip !== d.ip) events.push({ type: 'ip-changed', key: k, from: rec.ip, to: d.ip, at: now });
         if (prev && !prevKeys.has(k) && rec.online === false) events.push({ type: 'back', key: k, ip: d.ip, at: now });
+        rec.missed = 0;
       }
       Object.assign(rec, {
         mac: d.mac || rec.mac || '', ip: d.ip, cidr: d.cidr, gateway: d.gateway,
@@ -651,9 +654,9 @@ async function runScan(trigger = 'manual') {
     }
     for (const rec of Object.values(db.devices)) {
       if (rec.manual || seen.has(rec.key)) continue;
-      // only log "gone" for networks we actually swept; devices on networks that no longer exist just go offline quietly
-      if (rec.online && scanned.includes(rec.cidr)) events.push({ type: 'gone', key: rec.key, ip: rec.ip, at: now });
-      rec.online = false;
+      if (!scanned.includes(rec.cidr)) { rec.online = false; continue; } // network no longer exists
+      rec.missed = (rec.missed || 0) + 1;
+      if (rec.missed >= 2 && rec.online) { events.push({ type: 'gone', key: rec.key, ip: rec.ip, at: now }); rec.online = false; }
     }
     // tidy up: an IP-only record (seen across a router, no MAC) is replaced by the real device now seen at that IP
     for (const d of devices) {
@@ -677,6 +680,7 @@ async function runScan(trigger = 'manual') {
     if (history.scans.length > 3000) history.scans.splice(0, history.scans.length - 3000);
     db.events.push(...events.map(e => ({ ...e, scan: scanId })));
     if (db.events.length > 1500) db.events.splice(0, db.events.length - 1500);
+    autoMaintain(subnets, upstream, devices);
     saveDb(); saveHistory();
   } catch (e) {
     scanState.error = String((e && e.stack) || e);
@@ -684,6 +688,36 @@ async function runScan(trigger = 'manual') {
   } finally {
     scanState.running = false; scanState.finishedAt = Date.now(); scanState.phase = 'idle';
   }
+}
+
+/* ------------------------------------------------------------------ auto maintenance */
+function autoMaintain(subnets, upstream, devices) {
+  const mine = new Set(localIps());
+  // records for this PC's other adapters (Wi-Fi etc.) are folded into the PC
+  const self = Object.values(db.devices).find(d => d.isSelf && d.online);
+  for (const d of Object.values(db.devices)) {
+    if (d.isSelf || d.manual || !mine.has(d.ip)) continue;
+    if (self) db.aliases[d.key] = self.key;
+    delete db.devices[d.key];
+  }
+  // IP-only leftovers replaced by a real device at the same IP
+  for (const a of Object.values(db.devices)) {
+    if (!a.key.startsWith('ip:')) continue;
+    const b = Object.values(db.devices).find(x => x.mac && x.ip === a.ip && x.key !== a.key && x.online);
+    if (!b) continue;
+    for (const f of ['label', 'router', 'room', 'notes', 'kindOverride']) if (!b[f] && a[f]) b[f] = a[f];
+    db.aliases[a.key] = b.key; delete db.devices[a.key];
+  }
+  // if the main router is our gateway and no second router shows up anywhere, the other routers must be access points
+  const gwRouter = settings.routers.find(r => subnets.some(s => s.gateway && s.gateway === r.lanIp));
+  const nested = devices.some(d => d.nestedRouter);
+  if (gwRouter && gwRouter.role === 'main' && !upstream && !nested) {
+    let changed = false;
+    for (const r of settings.routers) if (r !== gwRouter && r.mode !== 'ap') { r.mode = 'ap'; changed = true; }
+    if (changed) saveSettings();
+  }
+  // remember extra adapters on this PC so the UI can mention them
+  db.selfExtraIps = [...mine].filter(ip => ip !== '127.0.0.1' && !ip.startsWith('169.254.') && !subnets.some(s => s.hostIp === ip) && subnets.some(s => inSubnet(ip, s.cidr)));
 }
 
 /* ------------------------------------------------------------------ network analysis */
@@ -718,7 +752,7 @@ function analysis() {
   const multi = networks.length > 1;
   const doubleNat = nested.length > 0 || !!upstream || !!(db.lastDoubleNat && db.lastDoubleNat.pcDoubleNat);
   const moved = devs.filter(d => d.moved && !d.moved.acked);
-  return { networks, multi, doubleNat, upstream, nestedRouters: nested.map(d => ({ key: d.key, ip: d.ip, router: d.routerMatch })), movedCount: moved.length, possibleRouters: devs.filter(d => d.possibleRouter && d.online).map(d => d.key) };
+  return { selfExtraIps: db.selfExtraIps || [], networks, multi, doubleNat, upstream, nestedRouters: nested.map(d => ({ key: d.key, ip: d.ip, router: d.routerMatch })), movedCount: moved.length, possibleRouters: devs.filter(d => d.possibleRouter && d.online).map(d => d.key) };
 }
 
 /* ------------------------------------------------------------------ double NAT check */
@@ -1135,4 +1169,4 @@ if (require.main === module) {
     setTimeout(() => runScan('startup'), 4000);
   });
 }
-module.exports = { app, _test: { parseRoutePrint, parseArp, parseDns, buildDnsQuery, readName, getGateways, readArp, hostsIn, netOf, inSubnet, vendorOf, shortVendor, classify, parseDeviceDesc, xmlTag, isRandomMac, runScan, analysis, getNetworks } };
+module.exports = { app, _test: { autoMaintain, getDb: () => db, getSettings: () => settings, parseRoutePrint, parseArp, parseDns, buildDnsQuery, readName, getGateways, readArp, hostsIn, netOf, inSubnet, vendorOf, shortVendor, classify, parseDeviceDesc, xmlTag, isRandomMac, runScan, analysis, getNetworks } };
